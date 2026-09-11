@@ -148,6 +148,12 @@ activemq-data/
 *.sage.py
 
 # Environments
+# SQLite runtime data and sidecar files
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
 .env
 .envrc
 .venv

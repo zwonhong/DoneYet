@@ -1,0 +1,1 @@
+"""DoneYet Discord bot."""
