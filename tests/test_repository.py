@@ -75,6 +75,39 @@ class CheckRepositoryTests(unittest.TestCase):
             for table in ('checks', 'check_days', 'check_members', 'check_schedules'):
                 self.assertEqual(db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 0)
 
+    def test_same_day_reminder_rules_when_repository_called_directly(self):
+        for check_time, reminder_time, valid in [
+            ('09:00', '22:00', True), ('14:00', '13:00', False),
+            ('14:00', '14:00', False), ('22:00', '23:30', True),
+            ('23:00', '00:30', False),
+        ]:
+            with self.subTest(check_time=check_time, reminder_time=reminder_time):
+                data = replace(self.study, schedules=(ScheduleInput(check_time, reminder_time),))
+                with connect_database(self.path) as db:
+                    before = [db.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]
+                              for t in ('checks', 'check_days', 'check_members', 'check_schedules')]
+                if valid:
+                    saved = self.repo.create_check(data)
+                    self.assertEqual(saved.schedules[0].reminder_time, reminder_time)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'Reminder Time'):
+                        self.repo.create_check(data)
+                    with connect_database(self.path) as db:
+                        after = [db.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]
+                                 for t in ('checks', 'check_days', 'check_members', 'check_schedules')]
+                    self.assertEqual(before, after)
+
+    def test_existing_invalid_schedule_is_not_modified(self):
+        saved = self.repo.create_check(self.study)
+        # Simulate a legacy row in this temporary test DB only.
+        with connect_database(self.path) as db:
+            db.execute("UPDATE check_schedules SET check_time = '14:00', reminder_time = '13:00' WHERE id = ?",
+                       (saved.schedules[0].id,))
+        initialize_database(self.path)
+        legacy = self.repo.get_check(100, saved.id)
+        self.assertEqual(legacy.schedules[0].check_time, '14:00')
+        self.assertEqual(legacy.schedules[0].reminder_time, '13:00')
+
 
 if __name__ == '__main__':
     unittest.main()

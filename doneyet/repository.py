@@ -7,7 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from doneyet.database import DB_PATH, connect_database
-from doneyet.models import Check, CheckInput, CheckMember, CheckSchedule, VerificationMode
+from doneyet.models import Check, CheckInput, CheckMember, CheckSchedule, ScheduleInput, VerificationMode
 
 
 def _validate_id(value: int) -> None:
@@ -15,7 +15,17 @@ def _validate_id(value: int) -> None:
         raise ValueError("Discord IDs must be positive SQLite-compatible integers.")
 
 
-def _validate(data: CheckInput) -> None:
+def validate_schedule_input(schedule: ScheduleInput) -> None:
+    for value in (schedule.check_time, schedule.reminder_time):
+        if not isinstance(value, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value):
+            raise ValueError("시간은 00:00~23:59 범위의 HH:MM 형식으로 입력하세요.")
+    # Fixed-width HH:MM strings sort chronologically after format validation.
+    if schedule.reminder_time <= schedule.check_time:
+        raise ValueError("Reminder Time은 Check Time보다 이후여야 합니다. 다음 날 Reminder는 지원하지 않습니다.")
+
+
+def validate_check_input(data: CheckInput) -> None:
+    """Validate without writing, also usable by a confirmation UI."""
     _validate_id(data.guild_id)
     _validate_id(data.channel_id)
     if not isinstance(data.name, str) or not data.name.strip():
@@ -40,9 +50,7 @@ def _validate(data: CheckInput) -> None:
     if not data.schedules:
         raise ValueError("At least one schedule is required.")
     for schedule in data.schedules:
-        for value in (schedule.check_time, schedule.reminder_time):
-            if not isinstance(value, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value):
-                raise ValueError("Schedule times must use HH:MM, from 00:00 to 23:59.")
+        validate_schedule_input(schedule)
 
 
 def _read_check(db: sqlite3.Connection, row: sqlite3.Row) -> Check:
@@ -72,7 +80,7 @@ class CheckRepository:
         self.db_path = Path(db_path)
 
     def create_check(self, data: CheckInput) -> Check:
-        _validate(data)
+        validate_check_input(data)
         with connect_database(self.db_path) as db:
             cursor = db.execute(
                 "INSERT INTO checks (guild_id, channel_id, name, verification_mode, timezone, enabled) VALUES (?, ?, ?, ?, ?, ?)",
