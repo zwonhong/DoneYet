@@ -109,6 +109,7 @@ Guild ID 설정을 지워도 Discord에 이미 등록된 guild 명령어를 자�
 - `doneyet/config.py`: `.env` 및 토큰 검증
 - `doneyet/bot.py`: Discord 클라이언트와 슬래시 명령어
 - `doneyet/check_commands.py`: `/check create` 등록 및 생성 권한 정책
+- `doneyet/check_browser.py`: `/check list`, `/check info`, `/check delete`의 페이지·선택·확인 화면
 - `doneyet/check_ui.py`: 생성 View·Modal, 설정 요약, Confirm·Cancel·timeout 처리
 - `doneyet/database.py`: SQLite 스키마, 연결 관리, 초기화, aware datetime 직렬화
 - `doneyet/models.py`: Check 입력 및 조회 결과 데이터 모델
@@ -116,6 +117,7 @@ Guild ID 설정을 지워도 Discord에 이미 등록된 guild 명령어를 자�
 - `tests/test_repository.py`: Check 저장·조회, 서버 구분, 입력 검증 및 저장 실패 테스트
 - `tests/test_database.py`: 임시 DB로 중복 제약, 외래키, 재초기화, rollback, datetime 검증
 - `tests/test_check_ui.py`: Discord 응답 모의 객체와 임시 DB를 이용한 UI 흐름·저장 테스트
+- `tests/test_check_browser.py`: 서버별 조회, 페이지 제한, 삭제 확인 및 rollback 검증
 - `tests/test_command_sync.py`: 그룹 payload, sync 순서·응답 로그, 개발 Guild 설정 테스트
 - `requirements.txt`: 실행 의존성
 
@@ -327,7 +329,7 @@ repository 직접 호출 역시 DB 연결·INSERT 전에 검증하므로 UI를 �
 
 ### 자동 테스트
 
-전체 41개: DB 5개, repository 6개, UI 21개, sync·설정 9개입니다.
+전체 54개: DB 5개, repository 6개, 생성 UI 21개, sync·설정 9개, 조회·삭제 13개입니다.
 기존 검증 범위는 유지하고 Wizard 단계 이동 관련 테스트는 단일 패널 수정·회차 변경으로 갱신했습니다.
 임시 DB와 Discord 모의 응답을 사용하며 운영 DB를 변경하지 않습니다.
 추가 검증은 다섯 시간 조합, repository 직접 호출 시 미저장, 기존 잘못된 row 보존,
@@ -336,6 +338,52 @@ repository 직접 호출 역시 DB 연결·INSERT 전에 검증하므로 UI를 �
 
 Scheduler, 자동 Check-in, Verification, Thread, Reminder 실행, Leaderboard,
 Monthly Report 및 `/check edit`는 구현하지 않습니다.
+
+## Check 조회·삭제 (Step 4)
+
+- `/check list`: 현재 서버의 Check 이름, 채널, 인증 방식, 요일, 하루 횟수,
+  참여자 수, Enabled를 한 페이지에 5개씩 표시합니다. 이전·다음 버튼으로 이동합니다.
+- `/check info`: 현재 페이지의 선택 메뉴에서 Check를 고르면 참여자 목록과
+  회차별 Sequence·Check Time·Reminder Time을 포함한 상세를 보여줍니다.
+  상세가 길면 여러 페이지로 나눕니다. ID를 직접 입력할 필요가 없습니다.
+- `/check delete`: 선택 → 삭제 대상 상세 확인 → Confirm 또는 Cancel 순서입니다.
+  Confirm 전에는 DB를 변경하지 않습니다.
+
+모든 화면은 실행자에게만 표시되며, 같은 서버의 실행자만 조작할 수 있습니다.
+5분 timeout과 취소는 삭제하지 않고 종료합니다. 현재 생성과 마찬가지로 서버 멤버에게
+열려 있으며 별도 관리자 권한 정책은 추가하지 않았습니다.
+빈 목록, 이미 삭제된 대상, 저장소 오류를 안내합니다. 목록은 명령 실행 시점의
+목록이며 새로 생성된 Check를 보려면 명령어를 다시 실행합니다.
+
+조회·삭제는 모두 repository에 `guild_id`를 전달합니다. 선택한 ID를 신뢰하지 않고
+현재 서버의 Check인지 다시 조회합니다. command 및 UI에는 SQL을 작성하지 않습니다.
+동기 DB 함수는 `asyncio.to_thread()`로 호출합니다.
+
+삭제는 기존 NO ACTION 외래키에 맞춰 하나의 트랜잭션에서
+`verifications → daily_checkins → check_members → check_days → check_schedules → checks`
+순서로 처리합니다. 해당 Check의 관련 DB 기록도 영구 삭제합니다.
+중간 실패 시 모두 rollback되며 다른 Check는 유지됩니다. SQLite 스키마는 변경하지 않습니다.
+Confirm 시 확인 화면의 설정과 DB의 설정을 비교하여 오래된 화면으로 변경된 대상이나
+재사용된 ID의 새 Check를 삭제하지 못하게 합니다. Discord 메시지·채널·Thread는 삭제하지 않습니다.
+
+### 직접 확인
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe main.py
+```
+
+1. 봇을 재시작하고 `/test`, 기존 `/check create`를 확인합니다.
+2. `/check list`에서 생성한 Check의 요약을 확인합니다. 6개 이상이면 다음 페이지도 확인합니다.
+3. `/check info`에서 이름으로 선택해 참여자와 회차별 시간을 확인합니다.
+4. `/check delete`에서 테스트용 Check를 선택하고 Cancel을 누른 뒤 목록에 남아 있는지 확인합니다.
+5. 다시 선택해 Confirm을 누릅니다. 해당 Check만 목록에서 사라지는지 확인합니다.
+6. Check가 없는 서버에서는 빈 목록 안내를 확인합니다.
+
+추가 테스트는 세 명령어 진입, 현재 서버 제한, ID 조작 차단, 목록·상세 페이지,
+Confirm 전 미삭제, 취소·timeout, 중복 Confirm, 관련 기록 삭제, 같은/다른 서버의 다른 Check 보존,
+실패 시 rollback·재시도, 이미 삭제된 대상과 ID 재사용을 검증합니다.
+실제 DB와 Discord에 영향을 주지 않는 임시 DB·모의 interaction 테스트입니다.
 
 참고: [discord.py 명령어 및 UI API](https://discordpy.readthedocs.io/en/stable/interactions/api.html),
 [python-dotenv 설정](https://pypi.org/project/python-dotenv/).

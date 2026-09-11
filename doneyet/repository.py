@@ -112,3 +112,21 @@ class CheckRepository:
             db.execute("BEGIN")
             rows = db.execute("SELECT * FROM checks WHERE guild_id = ? ORDER BY id", (guild_id,)).fetchall()
             return [_read_check(db, row) for row in rows]
+
+    def delete_check(self, guild_id: int, check_id: int, *, expected: Check | None = None) -> bool:
+        """Delete only a Check in this guild, including all dependent records."""
+        with connect_database(self.db_path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM checks WHERE id = ? AND guild_id = ?",
+                             (check_id, guild_id)).fetchone()
+            if row is None:
+                return False
+            # SQLite can reuse a deleted INTEGER PRIMARY KEY. A stale confirmation
+            # must not delete a replacement record or settings the user never saw.
+            if expected is not None and _read_check(db, row) != expected:
+                return False
+            # Existing foreign keys use NO ACTION: remove children first.
+            for table in ("verifications", "daily_checkins", "check_members", "check_days", "check_schedules"):
+                db.execute(f"DELETE FROM {table} WHERE check_id = ?", (check_id,))
+            db.execute("DELETE FROM checks WHERE id = ? AND guild_id = ?", (check_id, guild_id))
+            return True
