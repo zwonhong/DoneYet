@@ -4,14 +4,18 @@
 
 중요 원칙:
 
-- 항상 프로젝트의 `SPEC.md`를 기준으로 구현한다.
-- 한 단계에서 다음 단계 기능을 미리 구현하지 않는다.
-- 기존 기능을 깨뜨리지 않는다.
-- 각 단계 완료 후 직접 실행 및 Discord 테스트를 진행한다.
-- 테스트 완료 후 Git commit을 남긴다.
-- 개인 Discord Server ID, User ID, Bot Token 등을 하드코딩하지 않는다.
-- `.env`의 실제 값은 절대 출력하거나 Git에 포함하지 않는다.
-- Windows 개발 환경과 Raspberry Pi OS 환경 모두에서 동작할 수 있도록 작성한다.
+모든 단계에서 다음 원칙을 지킨다.
+
+- 작업 전 `SPEC.md`와 현재 프로젝트 구조를 먼저 확인한다.
+- 이미 구현된 model / repository / database 기능을 우선 재사용한다.
+- 동일한 validation 또는 DB 접근 로직을 command 코드에 중복 구현하지 않는다.
+- 현재 통과하고 있는 테스트를 깨뜨리지 않는다.
+- 이번 단계에서 요구하지 않은 다음 단계 기능을 미리 구현하지 않는다.
+- 개인 Discord Server ID, User ID, Bot Token을 하드코딩하지 않는다.
+- `.env`의 실제 값을 출력하거나 Git에 포함하지 않는다.
+- Windows와 Raspberry Pi OS에서 모두 실행 가능한 구조를 유지한다.
+- 불필요한 대규모 refactoring이나 과도한 abstraction을 하지 않는다.
+- 작업 완료 후 전체 unittest를 실행하고 기존 기능이 유지되는지 확인한다.
 
 
 ---
@@ -160,250 +164,554 @@ Reminder: 22:00
 
 ---
 
-# Step 3 — Check 조회 및 관리 기능 구현
+# Step 3 — `/check create` Discord UI
 
-`SPEC.md`와 현재 코드를 확인하고 Check 조회 기능을 구현해줘.
+현재 DoneYet?에는 다음 기능이 이미 구현되어 있다.
 
-이번 작업 범위:
+- Discord bot 실행
+- `/test`
+- SQLite 초기화
+- Check 데이터 모델
+- Check repository
+- Check + active days + participants + sessions 일괄 저장
+- 저장 실패 시 transaction rollback
+- 서버별 Check 저장/조회
+- repository 관련 unittest
 
-1. `/check list`
-2. `/check info`
-3. `/check delete`
+현재 구현과 `SPEC.md`를 먼저 확인한 뒤,
+Discord에서 실제 Check를 생성할 수 있는 `/check create` 기능을 구현해줘.
 
-`/check list`
+## 생성할 설정
 
-현재 Discord 서버에 등록된 Check 목록을 보여준다.
-
-표시 정보:
+사용자는 다음 항목을 설정할 수 있어야 한다.
 
 - Check 이름
-- 연결된 channel
-- verification mode
-- active weekdays
-- daily session 수
-- 참여자 수
+- Discord Channel
+- Participants
+- Verification Mode
+  - button
+  - photo
+  - either
+- Active Weekdays
+- Daily Sessions
+- 각 Session의:
+  - Check Time
+  - Reminder Time
 
-Check가 없으면 적절한 안내 메시지를 보여준다.
+v1에서는 모든 participant가 같은 schedule을 공유한다.
 
-
-`/check info`
-
-특정 Check의 상세 설정을 보여준다.
-
-표시 정보:
-
-- name
-- channel
-- verification mode
-- active weekdays
-- participants
-- 각 session의 sequence
-- check_time
-- reminder_time
-- enabled 여부
+참여자별 개별 schedule은 구현하지 않는다.
 
 
-`/check delete`
+## Discord UX
 
-특정 Check를 삭제한다.
+Discord Slash Command 한 번에 모든 값을 억지로 입력시키지 말고,
+필요하면 다음 Discord UI를 조합하여 단계형 설정 UI를 구현한다.
 
-요구사항:
+- View
+- Button
+- Select
+- ChannelSelect
+- UserSelect
+- Modal
 
-- 실수 방지를 위해 확인 UI를 제공
-- 삭제를 확정해야 실제 DB에서 삭제
-- foreign key cascade 또는 명시적 cleanup으로 관련 데이터 처리
-- 다른 Check에는 영향을 주면 안 됨
+사용 흐름은 최대한 단순하게 구성한다.
 
-아직 구현하지 말 것:
+예:
 
-- scheduler
-- verification
-- reminder
-- leaderboard
+/check create
+↓
+기본 설정
+↓
+요일 선택
+↓
+참여자 선택
+↓
+Session 설정
+↓
+설정 요약
+↓
+Confirm / Cancel
 
-기존 기능을 깨뜨리지 않을 것.
 
-작업 후 Discord에서 각각 테스트하는 절차를 알려줘.
+## 요구사항
+
+1. 모든 설정이 완료되기 전에는 DB에 저장하지 않는다.
+2. 최종 Confirm 시 기존 repository 저장 기능을 사용한다.
+3. Cancel할 수 있어야 한다.
+4. UI는 명령어를 실행한 사용자만 조작할 수 있어야 한다.
+5. 다른 사용자가 조작하면 ephemeral 안내를 보낸다.
+6. timeout을 처리한다.
+7. Verification Mode는 선택 UI를 사용한다.
+8. Active Weekdays는 복수 선택 가능해야 한다.
+9. Participants는 복수 사용자 선택 가능해야 한다.
+10. Session 수에 맞춰 각 회차의 시간을 입력받는다.
+11. 기존 model/repository validation을 최대한 재사용한다.
+12. 잘못된 입력은 ephemeral 메시지로 알려준다.
+13. 저장 실패 시 부분 데이터가 남지 않아야 한다.
+14. 생성 성공 후 Embed로 최종 설정을 보여준다.
+
+예:
+
+DoneYet? Check Created
+
+이름: 영양제
+채널: #영양제
+인증 방식: Button
+요일: 매일
+참여자: 3명
+하루 체크: 2회
+
+1회차
+09:00 → Reminder 12:00
+
+2회차
+21:00 → Reminder 23:00
+
+
+## 권한
+
+누가 Check를 생성할 수 있는지 현재 SPEC에 명확한 정책이 없다면,
+이번 단계에서는 임의로 강한 Discord 권한을 요구하지 말고
+현재 구조에 가장 단순한 정책을 사용한다.
+
+향후 관리자 권한 정책을 추가할 수 있도록 command 로직을 분리한다.
+
+
+## 이번 단계에서 구현하지 말 것
+
+- Scheduler
+- 실제 Check-in 메시지 자동 생성
+- Verification
+- Photo Detection
+- Verification Thread
+- Reminder
+- Leaderboard
+- Monthly Report
+
+
+## 작업 완료 후
+
+다음을 알려줘.
+
+- 생성/수정 파일
+- Discord UI 흐름
+- repository와 command가 연결되는 방식
+- Discord에서 직접 테스트하는 순서
+- 추가된 unittest
+- 전체 테스트 결과
 
 
 ---
 
-# Step 4 — 참여자 관리 기능 구현
+# Step 4 — Check 조회 / 삭제
 
-`SPEC.md`를 기준으로 Check 참여자 관리 기능을 구현해줘.
+현재 코드와 `SPEC.md`를 확인하고
+Discord에서 생성된 Check를 조회하고 삭제할 수 있도록 구현해줘.
 
 이번 작업 범위:
+
+- `/check list`
+- `/check info`
+- `/check delete`
+
+
+## `/check list`
+
+현재 Discord Guild에 등록된 Check만 보여준다.
+
+표시:
+
+- Check 이름
+- Channel
+- Verification Mode
+- Active Weekdays
+- Daily Sessions
+- Participant 수
+- Enabled 여부
+
+Check가 없다면 적절한 안내 메시지를 표시한다.
+
+Check가 많아 Discord 메시지 길이 제한을 넘을 가능성도 고려한다.
+
+
+## `/check info`
+
+특정 Check를 선택하여 상세 설정을 보여준다.
+
+표시:
+
+- Name
+- Channel
+- Verification Mode
+- Active Weekdays
+- Participants
+- Daily Sessions
+- 각 Session의:
+  - Sequence
+  - Check Time
+  - Reminder Time
+- Enabled
+
+
+가능하면 Check ID를 직접 입력시키기보다
+현재 Guild의 Check를 Discord 선택 UI로 선택할 수 있게 한다.
+
+
+## `/check delete`
+
+특정 Check를 삭제한다.
+
+실수 방지를 위해:
+
+삭제 대상 표시
+→ Confirm / Cancel
+
+흐름을 사용한다.
+
+Confirm 전에는 DB를 변경하지 않는다.
+
+삭제 후 관련 데이터 처리 방식은
+현재 Foreign Key 및 repository 구조를 확인하여 구현한다.
+
+다른 Check 데이터에는 영향을 주면 안 된다.
+
+
+## 중요
+
+- 현재 Guild의 Check만 접근 가능
+- 다른 Guild의 Check를 ID 조작 등으로 조회/삭제할 수 없어야 함
+- DB 접근 로직은 repository에 둔다.
+- command에서 SQL을 직접 작성하지 않는다.
+
+
+## 아직 구현하지 말 것
+
+- `/check edit`
+- Scheduler
+- Verification
+- Reminder
+- Leaderboard
+
+
+## 완료 후
+
+- 직접 테스트 방법
+- 추가 테스트
+- 전체 unittest 결과
+
+를 알려줘.
+
+
+---
+
+# Step 5 — Participant 관리
+
+`SPEC.md`와 현재 구현을 기준으로
+Check 생성 후 participant를 관리할 수 있도록 구현해줘.
+
+명령:
 
 - `/check member add`
 - `/check member remove`
 
-요구사항:
 
-`/check member add`
+## Add
 
-- Check 선택
-- Discord 사용자 선택
-- 이미 참여 중이면 중복 추가하지 않음
-- 성공 시 확인 메시지
+사용 흐름:
+
+Check 선택
+→ Discord User 선택
+→ 추가
+
+조건:
+
+- 현재 Guild의 Check만 선택 가능
+- 이미 participant라면 중복 추가하지 않는다.
+- Bot 계정 추가를 허용할 필요가 없다면 차단한다.
+- 성공 시 ephemeral 또는 적절한 확인 메시지를 표시한다.
 
 
-`/check member remove`
+## Remove
 
-- Check 선택
-- 현재 참여자 중 사용자 선택
-- 참여자가 아니면 오류 안내
-- 성공 시 확인 메시지
+사용 흐름:
 
-v1에서는:
+Check 선택
+→ 현재 Participant 선택
+→ 제거
 
-- 개별 Discord User 기반으로만 참여자를 관리한다.
-- Role 기반 참여는 구현하지 않는다.
-- Self Join / Self Leave도 구현하지 않는다.
-- 참여자별 개별 Schedule은 구현하지 않는다.
+조건:
 
-중요:
+- participant가 아닌 사용자를 제거할 수 없음
+- 다른 Check에는 영향 없음
 
-- 채널 접근 권한과 Check 참여 여부는 독립적이다.
-- 해당 채널을 볼 수 있어도 Check participant가 아니면 인증 대상이 아니다.
 
-추후 verification 기능에서 사용할 수 있도록
-`is_check_member(check_id, user_id)` 형태의 재사용 가능한 로직을 구성해줘.
+## 데이터 구조
 
-작업 후 테스트 절차를 알려줘.
+현재 `check_members` 구조와 repository를 먼저 확인한다.
+
+향후 leaderboard에서 다음 문제가 발생한다.
+
+- 월 중간 participant 추가
+- 월 중간 participant 제거
+- 과거 leaderboard 계산
+
+따라서 participant 제거 시 row를 단순 삭제하면
+과거 참여 이력이 사라지는 문제가 있는지 검토해줘.
+
+현재 schema로 이력을 보존할 수 없다면,
+이번 단계에서 최소한의 participant history 구조를 도입해도 된다.
+
+예:
+
+- joined_at
+- left_at
+- active
+
+단, 필요 이상의 구조 변경은 하지 않는다.
+
+
+## 재사용 가능한 기능
+
+향후 verification에서 사용할 수 있도록 다음과 같은
+재사용 가능한 participant 확인 기능을 제공한다.
+
+예:
+
+is_check_member(check_id, user_id)
+
+
+## v1에서 구현하지 않는 것
+
+- Role 기반 참여
+- Self Join
+- Self Leave
+- 사용자별 Schedule
+
+
+## 완료 후
+
+participant 추가/삭제 및
+과거 participation history가 어떻게 유지되는지 설명해줘.
 
 
 ---
 
-# Step 5 — Button Verification 구현
+# Step 6 — Button Verification
 
-현재 코드와 `SPEC.md`를 기준으로 Button 인증 기능을 구현해줘.
+현재 코드와 `SPEC.md`를 기준으로
+Button Verification 기능을 구현해줘.
 
-이번 단계에서는 scheduler 없이,
-개발자가 테스트용으로 Check-in 메시지를 생성할 수 있는 형태도 허용한다.
+아직 실제 Scheduler는 구현하지 않는다.
 
-목표:
+이번 단계에서는 Button 인증 자체를 테스트할 수 있도록
+개발용 Check-in 생성 방법을 제공해도 된다.
 
-Button verification 동작 자체를 먼저 완성한다.
 
-Check-in 메시지는 다음 정보를 포함한다.
+## 대상 Mode
 
-- Check 이름
-- 날짜
-- session sequence
-- 참여자
-- ✅ 완료 Button
+- button
+- either
 
-Button 클릭 시:
 
-1. 클릭한 사용자가 해당 Check participant인지 확인
-2. participant가 아니면 ephemeral 메시지로 안내
-3. 해당 날짜 + schedule + user에 이미 verification이 존재하는지 확인
-4. 없으면 verification 생성
-5. 있으면 중복 생성하지 않음
-6. 성공 시 ephemeral 완료 메시지 출력
+Photo mode에서는 Button을 제공하지 않는다.
 
-Verification 저장 기준:
 
-Unique:
+## Check-in UI
+
+예:
+
+💊 영양제 — 1/2
+
+2026-09-11 · 1회차
+
+[ ✅ 완료 ]
+
+
+## Button 클릭
+
+Button을 클릭하면:
+
+1. 해당 Check 확인
+2. 해당 Schedule 확인
+3. 클릭한 사용자가 participant인지 확인
+4. 해당 날짜에 실제 참여 상태였는지 확인
+5. 이미 verification이 존재하는지 확인
+6. 없으면 verification 생성
+7. 있으면 중복 생성하지 않음
+
+
+Unique 기준:
 
 check_id + schedule_id + user_id + date
+
 
 verification_method:
 
 button
 
-요구사항:
 
-- 같은 버튼을 여러 번 눌러도 DB에는 1회만 기록
-- Either mode에서도 button 인증 가능하도록 재사용 가능한 구조
-- Photo-only mode에서는 button을 제공하지 않도록 설계
-- Bot restart 후에도 이미 생성된 check-in button interaction이 가능한 방향을 고려
-  - discord.py persistent view 사용 가능 여부 검토
-  - 구현 가능하면 persistent custom_id 기반으로 작성
+## 사용자 응답
 
-아직 구현하지 말 것:
+성공:
 
-- 실제 시간 scheduler
-- photo verification
-- reminder
-- leaderboard
+인증 완료! ✅
 
-테스트를 쉽게 할 수 있는 방법을 함께 제공해줘.
+이미 인증:
+
+이미 이번 회차를 완료했어요. ✅
+
+비참여자:
+
+이 Check의 참여자가 아닙니다.
+
+
+가능하면 ephemeral로 응답한다.
+
+
+## Persistent View
+
+Raspberry Pi에서 bot이 재시작될 수 있으므로
+Discord.py Persistent View를 고려한다.
+
+기존 Check-in 메시지의 Button이
+bot restart 이후에도 동작할 수 있도록:
+
+- stable custom_id
+- persistent View
+
+구조를 사용하는 것이 적절한지 검토하고 구현한다.
+
+
+## 중요
+
+- 같은 Button 여러 번 클릭 → DB 1회
+- DB Unique Constraint를 최종 방어선으로 사용
+- Either mode에서 Button 후 Photo를 해도 최종 인증은 1회여야 함
+- 날짜/session/check를 interaction payload만 믿지 말고 DB와 일관성을 확인
+
+
+## 아직 구현하지 말 것
+
+- Scheduler
+- Photo Verification
+- Reminder
+- Leaderboard
+
+
+## 완료 후
+
+실제 Discord에서 Button 인증을 테스트할 수 있는 절차를 제공해줘.
 
 
 ---
 
-# Step 6 — Daily Scheduler 구현
+# Step 7 — Daily Scheduler
 
-현재 `SPEC.md`와 구현된 DB 구조를 기준으로 Daily Scheduler를 구현해줘.
+`SPEC.md`와 현재 구현을 기준으로
+실제 Check-in Scheduler를 구현해줘.
 
-목표:
+## 실행 조건
 
-각 Check의 active weekday와 session schedule을 읽어서
-지정된 시각에 Check-in 메시지를 자동 생성한다.
+Check가 다음 조건을 만족할 때 해당 Session의 Check-in을 생성한다.
 
-조건:
+- enabled
+- 현재 날짜가 Active Weekday
+- 현재 시간이 해당 Session의 check_time에 도달
+- 해당 날짜 + Session Check-in이 아직 생성되지 않음
 
-- Check가 enabled 상태여야 함
-- 오늘 요일이 active day여야 함
-- 해당 session의 check_time이 되었을 때 실행
-- 해당 날짜와 schedule의 Daily Check-in이 이미 존재하면 다시 생성하지 않음
 
-DB:
+## Check-in 저장
 
-`daily_checkins`
+`daily_checkins`에 저장한다.
 
 Unique:
 
 check_id + schedule_id + date
 
-Scheduler 요구사항:
+
+Check-in 메시지 생성 성공 후 필요한 Discord ID를 저장한다.
+
+예:
+
+- message_id
+- thread_id
+
+
+## Verification Mode
+
+button:
+- Button 포함
+
+either:
+- Button 포함
+- Thread는 다음 단계에서 추가
+
+photo:
+- 현재 단계에서는 기본 Check-in 메시지만 생성
+- Thread는 다음 단계
+
+
+## Scheduler 요구사항
 
 - timezone-aware
 - Check timezone 사용
 - 기본값 Asia/Seoul
-- 서버 OS의 local timezone에 의존하지 않음
-- 봇 재시작에 안전해야 함
-- loop가 같은 작업을 두 번 호출해도 DB 기준으로 중복 생성되지 않아야 함
-- Raspberry Pi에서 장기 실행 가능한 단순하고 안정적인 방식 사용
-- busy wait 사용하지 않음
+- OS local timezone에 의존하지 않음
+- busy waiting 사용하지 않음
+- Raspberry Pi에서 장기 실행 가능한 방식
+- 같은 task가 여러 번 평가되어도 중복 생성되지 않음
+- 한 Check에서 오류가 발생해도 전체 scheduler가 죽지 않음
 
-Check-in message 생성 후:
 
-- message_id 저장
-- 필요한 경우 thread_id는 이후 단계에서 저장
+## Restart Safety
 
-Button / Either mode:
+DB를 기준으로 이미 생성된 Check-in을 확인한다.
 
-- 기존 Button Verification UI 포함
+예:
 
-Photo mode:
+09:00 Check-in 생성
+09:30 bot restart
 
-- 아직 thread 생성은 다음 단계에서 구현해도 됨
+→ 09:00 Check-in을 다시 생성하지 않음
 
-봇 시작 시 scheduler가 자동 시작되도록 구성하되
-기존 `/test` 및 다른 commands가 정상 동작해야 한다.
 
-작업 후 다음 상황을 테스트하는 방법을 알려줘.
+Startup 시 놓친 Check-in을 복구하는 정책은
+현재 단계에서는 단순하고 명확하게 정의한다.
 
-1. 정상 시간 실행
-2. 같은 날짜 중복 생성 방지
-3. 봇 재시작 후 중복 생성 방지
-4. active weekday가 아닌 날 실행되지 않는지
+너무 오래 지난 Check-in을 무조건 뒤늦게 생성하지 않도록 한다.
+
+
+## 테스트
+
+실제 시간을 오래 기다리지 않고 테스트할 수 있도록
+scheduler의 핵심 판단 로직은 Discord 코드와 분리한다.
+
+다음 테스트를 작성한다.
+
+- Active weekday
+- Inactive weekday
+- Check time 도달
+- 중복 Check-in
+- restart 후 중복 방지
+- timezone
 
 
 ---
 
-# Step 7 — Photo Verification + Daily Thread 구현
+# Step 8 — Photo / Either Verification Thread
 
 `SPEC.md`를 기준으로 Photo Verification을 구현해줘.
 
-대상 verification mode:
+대상:
 
 - photo
 - either
 
-Daily Check-in이 생성될 때 Public Thread도 생성한다.
+
+## Thread 생성
+
+Daily Check-in 생성 시 Public Thread를 생성한다.
 
 Thread 이름:
 
@@ -413,58 +721,82 @@ YYYY-MM-DD · N회차 인증
 
 2026-09-11 · 1회차 인증
 
-생성된 thread_id는 `daily_checkins`에 저장한다.
 
-Thread 내 메시지를 감지하여 인증을 처리한다.
+생성된 `thread_id`를 `daily_checkins`에 저장한다.
 
-Photo verification 조건:
 
-1. 메시지가 DoneYet?이 관리하는 verification thread 안에 있어야 함
-2. 작성자가 해당 Check의 participant여야 함
-3. attachment가 최소 1개 있어야 함
-4. attachment가 image인지 확인
-5. 해당 날짜 + schedule + user verification이 없어야 함
+## Photo 인증 조건
 
-verification_method:
+Thread에 올라온 메시지가 다음 조건을 모두 만족해야 한다.
 
-photo
+1. DoneYet?이 관리하는 Verification Thread
+2. 해당 Check participant가 작성
+3. 해당 날짜에 실제 participant 상태
+4. Attachment가 최소 1개 존재
+5. Attachment가 image
+6. 아직 해당 Session verification이 없음
 
-텍스트만 있는 메시지는 인증으로 처리하지 않는다.
 
-Either mode:
+성공 시:
 
-- Button 또는 Photo 중 먼저 성공한 인증을 1회로 기록
-- 이후 다른 방법으로 인증해도 새로운 record를 생성하지 않음
+verification_method = photo
 
-중요:
 
-- 실제 이미지 내용을 AI로 분석하지 않는다.
-- 사진이 삭제되더라도 이미 DB에 저장된 verification은 유지한다.
-- SQLite가 Source of Truth이다.
-- bot 메시지나 다른 webhook 메시지는 인증 대상으로 처리하지 않는다.
+## 처리하지 않는 것
 
-작업 후 다음 테스트 방법을 설명해줘.
+- 일반 텍스트
+- 다른 Thread의 사진
+- 비참여자 사진
+- Bot 메시지
+- Webhook 메시지
+- 이미지가 아닌 일반 파일
 
-- participant 사진 업로드
-- non-participant 사진 업로드
-- 텍스트만 업로드
-- 같은 사람 중복 사진
-- Either mode button → photo
-- Either mode photo → button
+
+## Either
+
+Button 또는 Photo 중 먼저 성공한 방식만
+해당 회차 인증으로 기록한다.
+
+Button → Photo:
+추가 record 없음
+
+Photo → Button:
+추가 record 없음
+
+
+## 이미지 내용
+
+이미지 내용 자체는 분석하지 않는다.
+
+AI Image Verification은 v1 범위가 아니다.
+
+이미 인증된 사진을 사용자가 나중에 삭제해도
+DB verification은 유지한다.
+
+
+## 테스트
+
+- 정상 사진
+- 비참여자 사진
+- 텍스트
+- 일반 파일
+- 중복 사진
+- Either button → photo
+- Either photo → button
 
 
 ---
 
-# Step 8 — Reminder + Thread 종료 처리
+# Step 9 — Reminder + Thread 종료
 
-`SPEC.md`를 기준으로 Reminder와 Daily Thread 종료 기능을 구현해줘.
+현재 Schedule과 Verification 데이터를 기반으로
+Reminder와 Daily Thread 종료를 구현해줘.
+
 
 ## Reminder
 
-각 session의 reminder_time이 되면
-해당 날짜 / 해당 session의 미인증 participant를 조회한다.
-
-인증하지 않은 사람만 mention한다.
+각 Session의 `reminder_time`에
+아직 인증하지 않은 participant만 조회한다.
 
 예:
 
@@ -472,63 +804,90 @@ Either mode:
 
 @UserA @UserC
 
-조건:
 
-- 완료한 사용자는 mention하지 않음
-- 모든 참여자가 완료했다면 reminder를 보내지 않음
-- 같은 reminder가 여러 번 전송되지 않아야 함
-- bot restart 후에도 중복 reminder를 전송하지 않아야 함
+이미 인증한 사용자는 제외한다.
 
-이를 위해 필요한 경우 DB에 reminder_sent_at 또는 별도 상태 필드를 추가해도 된다.
-Schema 변경이 필요하면 migration 또는 기존 개발 DB에 안전한 처리 방식을 고려한다.
+모든 participant가 인증했다면
+Reminder 메시지를 보내지 않는다.
 
 
-## Thread Close
+## Reminder 중복 방지
 
-날짜가 종료되면 해당 날짜의 Photo / Either verification thread를:
+동일 Check + Date + Session Reminder는
+최대 한 번만 전송한다.
+
+bot restart 이후에도 중복 전송하면 안 된다.
+
+필요하면 DB에:
+
+- reminder_sent_at
+
+또는 별도 상태를 저장한다.
+
+
+## Thread 종료
+
+해당 날짜가 종료되면
+Photo / Either Verification Thread를:
 
 1. Lock
 2. Archive
 
 한다.
 
-조건:
 
-- 이미 archived / locked 상태면 다시 처리하지 않아도 됨
-- Button-only Check에는 thread가 없음
-- thread 처리 실패가 scheduler 전체를 중단시키지 않도록 예외 처리
+Button-only Check에는 Thread가 없다.
 
-지난 날짜 thread에서는 인증을 인정하지 않는다.
 
-작업 후:
+## 지난 Thread 인증
 
-- reminder 중복 방지
-- restart 후 reminder
-- thread lock
-- thread archive
+날짜가 종료된 Thread에서 사진을 올리더라도
+새 Verification으로 인정하지 않는다.
 
-테스트 절차를 설명해줘.
+
+## Error Handling
+
+특정 Thread 삭제, Discord permission 오류 등의 문제가 있어도
+Scheduler 전체가 종료되지 않도록 한다.
+
+
+## 테스트
+
+- 미인증자만 Reminder
+- 전원 인증 시 Reminder 없음
+- Reminder 중복 방지
+- Restart 후 중복 방지
+- Thread lock
+- Thread archive
 
 
 ---
 
-# Step 9 — Leaderboard 구현
+# Step 10 — Monthly Leaderboard
 
-`SPEC.md`를 기준으로 월간 leaderboard를 구현해줘.
+`SPEC.md`를 기준으로 월간 Leaderboard를 구현해줘.
 
-Command:
+명령:
 
-`/check leaderboard`
+/check leaderboard
 
-사용자가 선택할 값:
+
+## 입력
 
 - Check
-- 대상 연도/월
-  - 기본값은 현재 월
+- 연도 / 월
 
-집계 기준:
+연도와 월을 지정하지 않으면 현재 월을 사용한다.
 
-완료한 verification 수 / 예정된 verification 수
+
+## 계산
+
+Leaderboard는 단순 인증 횟수가 아니라:
+
+Completed / Scheduled
+
+기준으로 계산한다.
+
 
 예:
 
@@ -538,52 +897,59 @@ Command:
 2. User B — 55 / 60 (91.7%)
 3. User C — 49 / 60 (81.7%)
 
-예정 횟수 계산 시:
 
-- Check active weekdays
-- 해당 월의 실제 달력
-- 하루 session 수
-- participant의 참여 기간
+## Scheduled 계산
 
-을 고려해줘.
+반드시 고려:
 
-중요:
+- 해당 월의 실제 날짜
+- Active Weekdays
+- Daily Sessions
+- Participant joined_at
+- Participant left_at 또는 participation history
+- Check/Schedule history가 존재한다면 해당 기간
 
-참여자가 월 중간에 추가된 경우
-가입 전 날짜까지 예정 횟수에 포함시키지 않아야 한다.
 
-이를 위해 `check_members.joined_at`을 활용한다.
+월 중간에 참여한 사용자의 가입 이전 일정은
+분모에 포함하지 않는다.
 
-참여자가 제거된 경우까지 정확히 처리하려면
-현재 schema만으로 부족한지 검토하고,
-필요하다면 history를 보존할 수 있는 최소 schema 변경을 제안하고 구현해줘.
+월 중간에 탈퇴한 사용자의 탈퇴 이후 일정도
+분모에 포함하지 않는다.
 
-단순히 현재 check_members에 있는 사용자만 계산하면
-과거 leaderboard가 틀어질 수 있으므로 이 문제를 반드시 고려해줘.
 
-정렬:
+## 정렬
 
-1. completion rate
-2. completed count
+1. Completion Rate
+2. Completed Count
 3. 안정적인 tie-break
 
-Embed 형태로 보여줘.
 
-아직 streak 기능은 구현하지 않는다.
+## 중요
 
-작업 후 계산 예시와 테스트 방법을 설명해줘.
+과거 Leaderboard가 현재 Check 설정 변경 때문에
+바뀌어서는 안 되는지 현재 데이터 모델을 검토한다.
+
+현재 구조가 historical schedule 계산에 부족하다면
+문제를 설명하고 최소한의 변경으로 보완한다.
+
+
+## 아직 구현하지 말 것
+
+- Streak
+- Weekly Leaderboard
+- 개인 통계
 
 
 ---
 
-# Step 10 — Monthly Automatic Report 구현
+# Step 11 — Monthly Automatic Report
 
-`SPEC.md`를 기준으로 Monthly Automatic Report 기능을 구현해줘.
+현재 Leaderboard 계산 로직을 재사용하여
+지난달 결과를 자동 게시하는 기능을 구현해줘.
 
-목표:
+새 달이 시작된 이후
+지난달 결과를 해당 Check Channel에 게시한다.
 
-월이 끝난 후 각 Check의 지난달 leaderboard를
-해당 Check channel에 자동 게시한다.
 
 예:
 
@@ -597,327 +963,377 @@ Embed 형태로 보여줘.
 
 다음 달도 DoneYet?
 
-요구사항:
 
-- leaderboard 계산 로직을 재사용
-- 동일 월 report가 중복 게시되지 않도록 DB 상태 저장
-- bot restart에도 안전
-- timezone 기준으로 월 변경 판단
-- report 게시 실패가 다른 Check scheduler를 중단시키지 않도록 처리
+## 요구사항
 
-가능하면 월 마지막 날 자정 직전보다
-새 달이 시작된 이후 지난달 데이터를 확정해서 게시하는 구조로 구현해줘.
+- Leaderboard 계산 로직 재사용
+- timezone-aware
+- 동일 Check + Month Report 최대 1회
+- restart 후 중복 게시 방지
+- 게시 실패가 다른 Scheduler 작업에 영향 주지 않음
 
-작업 후 테스트를 위해
-실제 한 달을 기다리지 않고 강제로 report 함수를 실행할 수 있는 방법도 제공해줘.
+
+실제 한 달을 기다리지 않고 테스트할 수 있도록
+Report 생성 로직과 자동 실행 로직을 분리한다.
 
 
 ---
 
-# Step 11 — Check Edit 기능 구현
+# Step 12 — `/check edit`
 
-현재 구현된 DoneYet? 기능과 `SPEC.md`를 기준으로
-`/check edit` 기능을 구현해줘.
+현재 DoneYet? 구현과 `SPEC.md`를 기준으로
+Check 설정 수정 기능을 구현해줘.
 
-수정 가능한 항목:
+명령:
 
-- name
-- channel
-- verification mode
-- active weekdays
-- sessions
-  - session 추가
-  - session 삭제
-  - check_time 수정
-  - reminder_time 수정
-- enabled
+/check edit
 
-주의:
 
-과거 verification 및 daily_checkins 기록은 보존해야 한다.
+수정 가능:
 
-Schedule을 수정할 때 이미 과거에 사용된 `schedule_id`를
-무분별하게 삭제하여 historical record가 깨지지 않도록 설계해줘.
+- Name
+- Channel
+- Verification Mode
+- Active Weekdays
+- Session
+  - 추가
+  - 제거
+  - Check Time 변경
+  - Reminder Time 변경
+- Enabled
 
-필요하다면:
 
-- schedule active flag
-- effective date
+## 매우 중요
+
+과거 데이터는 보존한다.
+
+다음 기록이 깨지면 안 된다.
+
+- daily_checkins
+- verifications
+- 과거 leaderboard
+
+
+이미 과거에 사용된 schedule row를
+단순 DELETE 후 재생성해서 historical reference를 깨뜨리지 않는다.
+
+현재 schema를 검토해서 필요하다면:
+
+- active
+- valid_from
+- valid_until
 - soft delete
 
-등의 방식을 검토해
-과거 데이터와 현재 설정을 모두 안정적으로 유지해줘.
+등 최소한의 history 구조를 사용한다.
 
-단순히 기존 row를 삭제하고 새로 만드는 방식 때문에
-과거 leaderboard가 잘못되지 않도록 특히 주의해줘.
 
-작업 전에 현재 schema를 검토하고
-필요한 schema 변경이 있으면 이유를 먼저 설명한 뒤 구현해줘.
+설정 변경은 가능한 한
+미래 일정부터 적용되도록 설계한다.
 
-Discord UI는 가능한 한 간단하게 구성해줘.
+
+## Discord UX
+
+Check 선택
+→ 수정할 항목 선택
+→ 새 값 입력
+→ 변경 내용 확인
+→ Confirm
+
+
+한 번에 모든 설정을 다시 입력하게 만들 필요는 없다.
 
 
 ---
 
-# Step 12 — Restart Safety / Recovery 강화
+# Step 13 — Restart / Recovery 강화
 
-DoneYet?의 현재 전체 구현을 검토하고
-restart safety와 recovery 처리를 강화해줘.
+전체 코드를 검토하고 Restart Safety를 강화해줘.
 
-`SPEC.md`의 Restart Safety 원칙을 따른다.
+확인:
 
-확인할 항목:
+- Check-in 중복
+- Thread 중복
+- Verification 중복
+- Reminder 중복
+- Monthly Report 중복
+- Persistent Button
+- Startup 시 놓친 일정
 
-- Check-in 중복 생성
-- Thread 중복 생성
-- Verification 중복 생성
-- Reminder 중복 전송
-- Monthly Report 중복 전송
-- Bot startup 시 놓친 task 처리
 
-예:
+## 시나리오
 
-09:00 check-in 예정
-08:50 bot 종료
-09:20 bot 재시작
+09:00 Check-in 예정
+08:50 Bot 종료
+09:20 Bot 시작
 
-이 경우 오늘의 09:00 check-in을 어떻게 처리할지
-일관된 recovery policy를 정해서 구현해줘.
+이 상황에서 어떻게 복구할지
+명확한 Recovery Policy를 정의한다.
+
 
 권장:
 
-- 오늘 발생했어야 하는 작업 중 아직 처리되지 않은 작업은 startup 시 복구
-- 지나치게 오래 지난 작업까지 뒤늦게 보내지는 않도록 합리적인 기준 설정
-
-DB Unique Constraint를 최종 방어선으로 사용하고,
-scheduler 코드 자체도 idempotent하게 작성해줘.
-
-SQLite transaction 및 concurrency도 검토해줘.
-
-작업 후 아래 시나리오별 결과를 설명해줘.
-
-1. check_time 전에 restart
-2. check_time 직후 restart
-3. reminder 전 restart
-4. reminder 후 restart
-5. 자정 직전/직후 restart
+- 당일의 최근 놓친 Check-in은 복구
+- 이미 지나치게 오래된 Session은 무조건 생성하지 않음
+- Reminder도 일관된 정책 적용
+- DB Unique Constraint를 최종 방어선으로 사용
 
 
----
+모든 scheduled operation을 가능한 한 idempotent하게 만든다.
 
-# Step 13 — Error Handling / Logging 정리
 
-현재 프로젝트 전체를 검토하고 운영용 error handling과 logging을 정리해줘.
+다음 상황을 테스트한다.
 
-목표:
-
-Raspberry Pi에서 DoneYet?을 장기간 실행할 수 있는 수준으로 만든다.
-
-요구사항:
-
-- Python logging 사용
-- print 위주의 debug 출력 정리
-- startup 로그
-- Discord login 완료 로그
-- DB initialization 로그
-- scheduler 주요 이벤트 로그
-- command error 로그
-- thread creation 실패 로그
-- SQLite 오류 로그
-- Discord API 오류 로그
-
-Secret 정보는 로그에 출력하지 않는다.
-
-특히 다음 값 출력 금지:
-
-- Discord token
-- Client secret
-- `.env` 전체 내용
-
-예외 하나 때문에 scheduler loop 전체가 죽지 않도록 처리한다.
-
-단, 예외를 무조건 삼키지 말고
-문제 추적이 가능하도록 traceback 또는 적절한 exception 로그를 남긴다.
-
-개발 중 사용할 로그 레벨과
-운영 시 사용할 로그 레벨도 쉽게 설정할 수 있도록 구성해줘.
+1. Check Time 전 restart
+2. Check Time 직후 restart
+3. Reminder 전 restart
+4. Reminder 후 restart
+5. 자정 직전 restart
+6. 자정 직후 restart
 
 
 ---
 
-# Step 14 — Test 구조 정리
+# Step 14 — Error Handling / Logging
 
-현재 DoneYet? 코드에서
-Discord API 없이 테스트 가능한 핵심 로직을 분리하고 테스트를 작성해줘.
-
-우선 테스트 대상:
-
-- weekday 판단
-- schedule 판단
-- HH:MM validation
-- verification unique 처리
-- 예정 횟수 계산
-- leaderboard 계산
-- participant validation
-- restart recovery 판단
-
-pytest를 사용해도 된다.
-
-Discord API 자체를 복잡하게 mock하는 테스트보다
-비즈니스 로직을 Discord 코드에서 분리하여
-순수 함수 또는 service 단위 테스트를 만드는 것을 우선한다.
-
-테스트 실행:
-
-pytest
-
-한 번에 모든 architecture를 갈아엎지 말고,
-현재 구조에서 필요한 범위만 refactor해줘.
-
-기존 실제 Discord 동작이 깨지지 않도록 한다.
-
-작업 후:
-
-- 테스트 목록
-- 각 테스트 목적
-- 실행 명령어
-
-를 설명해줘.
+Raspberry Pi에서 장기간 운영할 수 있도록
+전체 Error Handling과 Logging을 정리해줘.
 
 
----
+## Logging
 
-# Step 15 — Raspberry Pi Deployment 준비
+Python `logging`을 사용한다.
 
-현재 DoneYet? 프로젝트를 Raspberry Pi OS Lite에서
-24시간 실행할 수 있도록 deployment 구성을 준비해줘.
+로그 대상:
 
-대상:
+- Startup
+- Discord Login
+- DB Initialization
+- Check-in 생성
+- Verification
+- Reminder
+- Thread 생성/종료
+- Monthly Report
+- Command Error
+- Discord API Error
+- SQLite Error
+- Scheduler Error
 
-- Raspberry Pi
-- Raspberry Pi OS Lite
-- Python
-- SQLite
-- systemd
-- GitHub clone 기반 설치
 
-이번 단계에서는 Docker를 사용하지 않는다.
+## Security
 
-준비할 내용:
+절대 로그에 출력하지 않는다.
 
-1. Python virtual environment 설치 방법
-2. requirements 설치
-3. `.env` 생성 방법
-4. DB directory 권한
-5. bot 수동 실행 방법
-6. systemd service 파일 예제
-7. 부팅 시 자동 시작
-8. crash 시 자동 재시작
-9. service status 확인
-10. logs 확인
-11. service restart / stop 방법
-12. GitHub에서 새 버전 pull 후 업데이트하는 방법
+- Discord Token
+- Client Secret
+- `.env` 내용
 
-Repository에 포함하면 좋은 경우:
 
-- `deploy/doneyet.service.example`
-- deployment 관련 README 문서
+## 안정성
 
-단:
+한 Check 또는 한 Thread에서 발생한 예외 때문에
+전체 Scheduler가 종료되지 않도록 한다.
 
-- 실제 username
-- 실제 home directory
-- 실제 token
+예외를 무조건 무시하지 말고
+원인을 추적할 수 있는 로그를 남긴다.
 
-등을 하드코딩하지 않는다.
-
-Raspberry Pi뿐 아니라 일반 Linux에서도 수정해서 사용할 수 있는 형태로 작성해줘.
+개발/운영 로그 레벨을 쉽게 설정할 수 있도록 한다.
 
 
 ---
 
-# Step 16 — Final v1 Review
+# Step 15 — Test Suite 정리
 
-DoneYet? v1 전체 코드를 `SPEC.md` 기준으로 최종 검토해줘.
+현재 DoneYet?의 핵심 Business Logic을 검토하고
+Discord API 없이 테스트 가능한 부분의 unittest를 보강해줘.
 
-새로운 기능을 추가하는 단계가 아니다.
+현재 프로젝트가 `unittest`를 사용하고 있으므로
+특별한 이유가 없다면 pytest로 전환하지 말고 기존 방식을 유지한다.
 
-다음 항목을 집중적으로 확인해줘.
+
+우선 테스트:
+
+- Time Validation
+- Weekday 판단
+- Schedule 판단
+- Participant 상태
+- Verification 중복
+- Check-in 중복
+- Reminder 대상 계산
+- Scheduled Count
+- Leaderboard
+- Restart Recovery
+- Timezone
+- Repository Transaction
+
+
+Discord API를 과도하게 mock하기보다
+Business Logic을 Discord Command/Event 코드에서 분리하여
+테스트하는 것을 우선한다.
+
+테스트를 위해 전체 Architecture를 갈아엎지 않는다.
+
+
+---
+
+# Step 16 — Raspberry Pi Deployment
+
+현재 프로젝트를 Raspberry Pi OS Lite에서
+24시간 self-hosting할 수 있도록 준비해줘.
+
+환경:
+
+Raspberry Pi
+→ Raspberry Pi OS Lite
+→ Python
+→ SQLite
+→ systemd
+
+
+Docker는 사용하지 않는다.
+
+
+## 문서화
+
+다음을 포함한다.
+
+1. Repository clone
+2. Python venv 생성
+3. requirements 설치
+4. `.env` 생성
+5. DB 초기화
+6. Bot 수동 실행
+7. systemd service 등록
+8. Boot 자동 시작
+9. Crash 자동 재시작
+10. Status 확인
+11. Logs 확인
+12. Restart
+13. Stop
+14. Git pull을 이용한 업데이트
+
+
+필요하면:
+
+deploy/doneyet.service.example
+
+을 추가한다.
+
+
+실제 다음 값은 하드코딩하지 않는다.
+
+- Linux username
+- 실제 home path
+- Bot Token
+
+
+일반 Linux에서도 경로만 수정하여 사용할 수 있도록 한다.
+
+
+---
+
+# Step 17 — Final v1 Review
+
+DoneYet? 전체 구현을 `SPEC.md` 기준으로 최종 검토해줘.
+
+새 기능을 추가하는 단계가 아니다.
+
 
 ## Functional
 
-- Check 생성
-- Check 조회
-- Check 수정
-- Check 삭제
-- participant 관리
-- active weekday
-- multiple daily sessions
+확인:
+
+- `/test`
+- `/check create`
+- `/check list`
+- `/check info`
+- `/check delete`
+- `/check edit`
+- participant add/remove
+- Active Weekdays
+- Multiple Daily Sessions
 - Button Verification
 - Photo Verification
 - Either Verification
 - Reminder
-- Thread lifecycle
+- Thread Lifecycle
 - Leaderboard
 - Monthly Report
 
 
 ## Data Integrity
 
+확인:
+
 - Foreign Keys
 - Unique Constraints
-- historical data
-- participant history
-- schedule history
-- restart safety
+- Transactions
+- Participant History
+- Schedule History
+- Historical Leaderboard
+- Restart Safety
 
 
 ## Discord
 
+확인:
+
 - 최소 권한
-- participant 아닌 사용자 처리
-- persistent button
-- thread 처리
-- ephemeral response
+- 비참여자 처리
+- Persistent Button
+- Public Thread
+- Ephemeral Response
+- Guild Isolation
 
 
 ## Security
 
-- token hardcoding 없음
-- secret logging 없음
-- `.env` gitignore 확인
-- 개인 Server ID/User ID hardcoding 없음
+확인:
+
+- Token hardcoding 없음
+- Secret logging 없음
+- `.env` Git 제외
+- 개인 Guild/User ID hardcoding 없음
 
 
 ## Deployment
 
-- Windows 실행
-- Linux 실행
-- Raspberry Pi 실행
+확인:
+
+- Windows
+- Raspberry Pi OS / Linux
+- SQLite
 - systemd
 
 
 ## Code Quality
 
-- 지나친 파일 분리 여부
-- 중복 코드
-- dead code
-- 지나친 abstraction
-- error handling
-- typing
-- comments
-- README와 실제 구현 일치 여부
+확인:
 
-문제가 있다면 우선순위를:
+- 중복 코드
+- Dead Code
+- 지나친 Abstraction
+- 지나친 파일 분리
+- Error Handling
+- Type Hints
+- README / SPEC와 실제 동작 일치
+
+
+발견한 문제를:
 
 - Critical
 - Important
-- Nice to have
+- Nice to Have
 
-로 나눠서 설명하고,
-Critical / Important 항목만 수정해줘.
+로 구분한다.
 
-SPEC에 없는 신규 기능은 추가하지 말 것.
+Critical / Important만 수정한다.
 
-마지막으로 DoneYet? v1이 실제 사용 가능한 상태인지 평가하고,
-남아 있는 제한사항을 정리해줘.
+SPEC에 없는 신규 기능은 임의로 추가하지 않는다.
+
+마지막으로:
+
+1. DoneYet? v1이 실제 사용 가능한 상태인지
+2. 알려진 제한사항
+3. Raspberry Pi 배포 전에 사람이 직접 확인해야 할 항목
+
+을 정리해줘.
