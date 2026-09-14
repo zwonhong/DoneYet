@@ -1,7 +1,7 @@
 # DoneYet
 DoneYet? - A self-hosted daily check-in bot for Discord.
 
-현재는 Discord 로그인, `/test`, SQLite 데이터 계층과 `/check create` 단일 설정 패널가 구현되어 있습니다.
+현재는 Discord 로그인, `/test`, SQLite 데이터 계층, Check 생성·조회·삭제 기능이 구현되어 있습니다.
 Python 3.10 이상을 사용합니다.
 
 ## 설정
@@ -110,6 +110,7 @@ Guild ID 설정을 지워도 Discord에 이미 등록된 guild 명령어를 자�
 - `doneyet/bot.py`: Discord 클라이언트와 슬래시 명령어
 - `doneyet/check_commands.py`: `/check create` 등록 및 생성 권한 정책
 - `doneyet/check_browser.py`: `/check list`, `/check info`, `/check delete`의 페이지·선택·확인 화면
+- `doneyet/member_commands.py`: `/check member add`·`remove` 참여자 관리 UI
 - `doneyet/check_ui.py`: 생성 View·Modal, 설정 요약, Confirm·Cancel·timeout 처리
 - `doneyet/database.py`: SQLite 스키마, 연결 관리, 초기화, aware datetime 직렬화
 - `doneyet/models.py`: Check 입력 및 조회 결과 데이터 모델
@@ -118,6 +119,7 @@ Guild ID 설정을 지워도 Discord에 이미 등록된 guild 명령어를 자�
 - `tests/test_database.py`: 임시 DB로 중복 제약, 외래키, 재초기화, rollback, datetime 검증
 - `tests/test_check_ui.py`: Discord 응답 모의 객체와 임시 DB를 이용한 UI 흐름·저장 테스트
 - `tests/test_check_browser.py`: 서버별 조회, 페이지 제한, 삭제 확인 및 rollback 검증
+- `tests/test_member_commands.py`: 참여자 명령어·권한·중복·비참여자 처리 검증
 - `tests/test_command_sync.py`: 그룹 payload, sync 순서·응답 로그, 개발 Guild 설정 테스트
 - `requirements.txt`: 실행 의존성
 
@@ -335,6 +337,38 @@ repository 직접 호출 역시 DB 연결·INSERT 전에 검증하므로 UI를 �
 추가 검증은 다섯 시간 조합, repository 직접 호출 시 미저장, 기존 잘못된 row 보존,
 전체 설정 표시, 순서 없는 수정, 누락 항목 안내, 잘못된 입력 시 상태 유지,
 회차 번호별 Modal 입력, 최종 생성 시 repository 호출입니다.
+
+## 참여자 관리 (Step 5)
+
+`/check member add`와 `/check member remove`는 실행자에게만 보이는 UI를 엽니다.
+현재 서버의 Check와 Discord 사용자를 선택한 뒤 추가·제거를 실행합니다.
+다른 서버의 Check ID를 사용할 수 없고, 다른 사용자의 interaction은 거부됩니다.
+
+참여자 제거는 row를 삭제하지 않고 `active = 0`, `left_at`에 UTC 시각을 기록합니다.
+`joined_at`과 `left_at`을 유지하므로 향후 leaderboard에서 가입·탈퇴 기간을 계산할 수 있습니다.
+현재 Check 조회의 `members`는 활성 참여자만 반환하며 이력 row는 DB에 남습니다.
+제거했던 사용자를 다시 추가하면 기존 row를 활성화해 중복 row를 만들지 않습니다.
+`CheckRepository.is_check_member(check_id, user_id)`는 현재 활성 참여자 여부를 반환합니다.
+
+사용자 선택은 Discord `UserSelect`를 사용하므로 비공개 채널에서도 서버 멤버를 선택할
+수 있습니다. `remove`는 제출 시 현재 활성 참여자인지 확인하고, `add`는 현재 활성
+참여자를 제외하며 연결 채널의 `View Channel` 권한이 있는지 다시 검사합니다.
+따라서 공개 채널은 접근 가능한 서버 멤버, 비공개 채널은 권한이 부여된 멤버만 추가할
+수 있습니다. 봇 코드에서 `Members Intent`를 켜고, Discord Developer Portal의
+Bot 설정에서도 **Server Members Intent**를 활성화해야 합니다.
+
+기존 DB에는 `initialize_database()`가 누락된 `left_at`·`active` 컬럼을 자동으로 추가하며,
+기존 row는 활성 상태로 보존합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe main.py
+```
+
+직접 확인 순서: `/check member add` → Check 선택 → 사용자 선택 → 추가.
+같은 사용자를 다시 추가해 중복 안내를 확인하고, `/check member remove`에서 제거한 뒤
+`/check info`에서 목록에서 사라지는지 확인합니다. 다시 추가하면 복원됩니다.
+비참여자 제거, 다른 Check·다른 서버 접근, 취소·timeout도 확인할 수 있습니다.
 
 Scheduler, 자동 Check-in, Verification, Thread, Reminder 실행, Leaderboard,
 Monthly Report 및 `/check edit`는 구현하지 않습니다.

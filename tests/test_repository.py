@@ -108,6 +108,25 @@ class CheckRepositoryTests(unittest.TestCase):
         self.assertEqual(legacy.schedules[0].check_time, '14:00')
         self.assertEqual(legacy.schedules[0].reminder_time, '13:00')
 
+    def test_member_add_remove_preserves_history(self):
+        check = self.repo.create_check(self.study)
+        self.assertTrue(self.repo.is_check_member(check.id, 999) is False)
+        self.assertEqual(self.repo.add_member(100, check.id, 999), 'added')
+        self.assertEqual(self.repo.add_member(100, check.id, 999), 'already_member')
+        self.assertTrue(self.repo.is_check_member(check.id, 999))
+        self.assertEqual(self.repo.remove_member(100, check.id, 999), 'removed')
+        self.assertEqual(self.repo.remove_member(100, check.id, 999), 'not_member')
+        with connect_database(self.path) as db:
+            row = db.execute('SELECT active, left_at FROM check_members WHERE check_id = ? AND user_id = ?', (check.id, 999)).fetchone()
+            self.assertEqual(row['active'], 0)
+            self.assertIsNotNone(row['left_at'])
+        self.assertEqual(self.repo.add_member(100, check.id, 999), 'reactivated')
+
+    def test_member_operations_are_guild_scoped(self):
+        check = self.repo.create_check(self.study)
+        self.assertEqual(self.repo.add_member(101, check.id, 999), 'missing_check')
+        self.assertEqual(self.repo.remove_member(101, check.id, 300), 'missing_check')
+
 
 if __name__ == '__main__':
     unittest.main()

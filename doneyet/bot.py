@@ -7,6 +7,7 @@ from discord import app_commands
 
 from doneyet.check_commands import CheckCommands
 from doneyet.repository import CheckRepository
+from doneyet.member_commands import MemberCommands
 
 
 logger = logging.getLogger(__name__)
@@ -30,11 +31,14 @@ class DoneYetBot(discord.Client):
     def __init__(self, *, guild_id: int | None = None) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
+        intents.members = True
         super().__init__(intents=intents)
         self.development_guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
         self.tree.add_command(test_command)
-        self.tree.add_command(CheckCommands(CheckRepository()))
+        check_commands = CheckCommands(CheckRepository())
+        check_commands.add_command(MemberCommands(check_commands.repository))
+        self.tree.add_command(check_commands)
 
     async def setup_hook(self) -> None:
         # All modules/groups are registered in __init__ before any sync occurs.

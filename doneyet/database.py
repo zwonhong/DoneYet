@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS check_members (
     check_id INTEGER NOT NULL REFERENCES checks(id),
     user_id INTEGER NOT NULL,
     joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')),
+    left_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     PRIMARY KEY (check_id, user_id)
 );
 
@@ -100,6 +102,11 @@ def initialize_database(db_path: Path = DB_PATH) -> None:
     """Create missing tables without clearing existing records."""
     with connect_database(db_path) as connection:
         connection.executescript("BEGIN;\n" + SCHEMA + "\nCOMMIT;")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(check_members)")}
+        if "left_at" not in columns:
+            connection.execute("ALTER TABLE check_members ADD COLUMN left_at TEXT")
+        if "active" not in columns:
+            connection.execute("ALTER TABLE check_members ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
 
 
 if __name__ == "__main__":

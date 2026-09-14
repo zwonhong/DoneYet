@@ -62,8 +62,10 @@ def _read_check(db: sqlite3.Connection, row: sqlite3.Row) -> Check:
         created_at=datetime.fromisoformat(row["created_at"]),
         weekdays=tuple(r[0] for r in db.execute(
             "SELECT weekday FROM check_days WHERE check_id = ? ORDER BY weekday", (check_id,))),
-        members=tuple(CheckMember(r["user_id"], datetime.fromisoformat(r["joined_at"]))
-                      for r in db.execute("SELECT * FROM check_members WHERE check_id = ? ORDER BY user_id", (check_id,))),
+        members=tuple(CheckMember(r["user_id"], datetime.fromisoformat(r["joined_at"]),
+                                   datetime.fromisoformat(r["left_at"]) if r["left_at"] else None,
+                                   bool(r["active"]))
+                      for r in db.execute("SELECT * FROM check_members WHERE check_id = ? AND active = 1 ORDER BY user_id", (check_id,))),
         schedules=tuple(CheckSchedule(r["id"], r["sequence"], r["check_time"], r["reminder_time"])
                         for r in db.execute("SELECT * FROM check_schedules WHERE check_id = ? ORDER BY sequence", (check_id,))),
     )
@@ -112,6 +114,44 @@ class CheckRepository:
             db.execute("BEGIN")
             rows = db.execute("SELECT * FROM checks WHERE guild_id = ? ORDER BY id", (guild_id,)).fetchall()
             return [_read_check(db, row) for row in rows]
+
+    def is_check_member(self, check_id: int, user_id: int) -> bool:
+        with connect_database(self.db_path) as db:
+            return db.execute("SELECT 1 FROM check_members WHERE check_id = ? AND user_id = ? AND active = 1",
+                              (check_id, user_id)).fetchone() is not None
+
+    def list_members(self, guild_id: int, check_id: int) -> list[CheckMember] | None:
+        """Return active members only when the Check belongs to the guild."""
+        with connect_database(self.db_path) as db:
+            if db.execute("SELECT 1 FROM checks WHERE id = ? AND guild_id = ?", (check_id, guild_id)).fetchone() is None:
+                return None
+            return [CheckMember(r["user_id"], datetime.fromisoformat(r["joined_at"]),
+                                datetime.fromisoformat(r["left_at"]) if r["left_at"] else None,
+                                bool(r["active"]))
+                    for r in db.execute("SELECT * FROM check_members WHERE check_id = ? AND active = 1 ORDER BY user_id", (check_id,))]
+
+    def add_member(self, guild_id: int, check_id: int, user_id: int) -> str:
+        with connect_database(self.db_path) as db:
+            check = db.execute("SELECT 1 FROM checks WHERE id = ? AND guild_id = ?", (check_id, guild_id)).fetchone()
+            if check is None:
+                return "missing_check"
+            row = db.execute("SELECT active FROM check_members WHERE check_id = ? AND user_id = ?", (check_id, user_id)).fetchone()
+            if row and row["active"]:
+                return "already_member"
+            if row:
+                db.execute("UPDATE check_members SET active = 1, left_at = NULL WHERE check_id = ? AND user_id = ?", (check_id, user_id))
+                return "reactivated"
+            db.execute("INSERT INTO check_members (check_id, user_id) VALUES (?, ?)", (check_id, user_id))
+            return "added"
+
+    def remove_member(self, guild_id: int, check_id: int, user_id: int) -> str:
+        with connect_database(self.db_path) as db:
+            if db.execute("SELECT 1 FROM checks WHERE id = ? AND guild_id = ?", (check_id, guild_id)).fetchone() is None:
+                return "missing_check"
+            if db.execute("SELECT 1 FROM check_members WHERE check_id = ? AND user_id = ? AND active = 1", (check_id, user_id)).fetchone() is None:
+                return "not_member"
+            db.execute("UPDATE check_members SET active = 0, left_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') WHERE check_id = ? AND user_id = ?", (check_id, user_id))
+            return "removed"
 
     def delete_check(self, guild_id: int, check_id: int, *, expected: Check | None = None) -> bool:
         """Delete only a Check in this guild, including all dependent records."""

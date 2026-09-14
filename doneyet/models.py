@@ -42,6 +42,8 @@ class CheckSchedule:
 class CheckMember:
     user_id: int
     joined_at: datetime
+    left_at: datetime | None = None
+    active: bool = True
 
 
 @dataclass(frozen=True)
