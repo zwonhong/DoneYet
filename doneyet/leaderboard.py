@@ -8,6 +8,7 @@ def calculate_month(repository, check, year: int, month: int):
     with connect_database(repository.db_path) as db:
         rows = db.execute("SELECT user_id, joined_at, left_at FROM check_members WHERE check_id=?", (check.id,)).fetchall()
         completed = {(r[0], r[1], r[2]) for r in db.execute("SELECT user_id,date,schedule_id FROM verifications WHERE check_id=? AND date LIKE ?", (check.id, f"{year:04d}-{month:02d}-%"))}
+        historical_dates = {r[0] for r in db.execute("SELECT DISTINCT date FROM daily_checkins WHERE check_id=? AND date LIKE ?", (check.id, f"{year:04d}-{month:02d}-%"))}
     result=[]
     for row in rows:
         joined = datetime.fromisoformat(row[1]).date()
@@ -15,7 +16,10 @@ def calculate_month(repository, check, year: int, month: int):
         scheduled = 0; done = 0
         for offset in range(days):
             day = start.fromordinal(start.toordinal()+offset)
-            if day.weekday() not in check.weekdays or day < joined or (left and day >= left): continue
+            # A persisted Check-in proves that the date was scheduled under a
+            # previous configuration. Keep it in historical Leaderboards even
+            # when the current weekday setting has since changed.
+            if (day.weekday() not in check.weekdays and day.isoformat() not in historical_dates) or day < joined or (left and day >= left): continue
             scheduled += check.daily_sessions
             done += sum((row[0], day.isoformat(), schedule.id) in completed for schedule in check.schedules)
         result.append((row[0], done, scheduled, (done/scheduled if scheduled else 0.0)))
