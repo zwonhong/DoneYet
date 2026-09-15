@@ -421,3 +421,12 @@ Confirm 전 미삭제, 취소·timeout, 중복 Confirm, 관련 기록 삭제, �
 
 참고: [discord.py 명령어 및 UI API](https://discordpy.readthedocs.io/en/stable/interactions/api.html),
 [python-dotenv 설정](https://pypi.org/project/python-dotenv/).
+# Restart / Recovery policy
+
+The scheduler evaluates immediately after startup and every 30 seconds. A
+Check-in is recovered when the timezone-aware current time is from the scheduled
+time through 30 minutes afterward; older missed sessions are skipped. The
+`daily_checkins` unique key prevents duplicate Check-ins, `verifications`
+prevents duplicate user verification, and persisted reminder/report markers
+prevent duplicate notifications after restart. Existing persistent buttons are
+registered again from the database on startup.

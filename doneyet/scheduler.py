@@ -6,7 +6,9 @@ from zoneinfo import ZoneInfo
 
 from doneyet.models import Check, CheckSchedule
 
-RECOVERY_WINDOW = timedelta(minutes=5)
+# A restart may miss a few scheduler ticks. Recover sessions up to 30 minutes
+# after their scheduled time; older missed sessions are intentionally skipped.
+RECOVERY_WINDOW = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)

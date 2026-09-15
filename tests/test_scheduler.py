@@ -30,6 +30,10 @@ class SchedulerDecisionTests(unittest.TestCase):
         self.assertEqual([d.schedule.sequence for d in due_sessions(self.check, exact)], [1])
         self.assertEqual(due_sessions(self.check, old), [])
 
+    def test_restart_recovery_within_thirty_minutes(self):
+        restarted = datetime(2026, 9, 14, 0, 20, tzinfo=timezone.utc)
+        self.assertEqual([d.schedule.sequence for d in due_sessions(self.check, restarted)], [1])
+
     def test_timezone_conversion(self):
         # 00:00 UTC is 09:00 in Asia/Seoul.
         now = datetime(2026, 9, 14, 0, 0, tzinfo=timezone.utc)
