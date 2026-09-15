@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS daily_checkins (
     message_id INTEGER NOT NULL,
     thread_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')),
-    closed_at TEXT,
+  closed_at TEXT,
+  reminder_sent_at TEXT,
     UNIQUE (check_id, schedule_id, date),
     FOREIGN KEY (check_id, schedule_id) REFERENCES check_schedules(check_id, id)
 );
@@ -72,7 +73,8 @@ CREATE TABLE IF NOT EXISTS verifications (
     UNIQUE (check_id, schedule_id, user_id, date),
     FOREIGN KEY (check_id, schedule_id, date)
         REFERENCES daily_checkins(check_id, schedule_id, date)
-);
+  );
+
 """
 
 
@@ -107,6 +109,9 @@ def initialize_database(db_path: Path = DB_PATH) -> None:
             connection.execute("ALTER TABLE check_members ADD COLUMN left_at TEXT")
         if "active" not in columns:
             connection.execute("ALTER TABLE check_members ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        daily_columns = {row[1] for row in connection.execute("PRAGMA table_info(daily_checkins)")}
+        if "reminder_sent_at" not in daily_columns:
+            connection.execute("ALTER TABLE daily_checkins ADD COLUMN reminder_sent_at TEXT")
 
 
 if __name__ == "__main__":

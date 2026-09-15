@@ -117,7 +117,7 @@ class DoneYetBot(discord.Client):
         """Re-register buttons for persisted check-ins after a restart."""
         for guild in self.guilds:
             for check in await asyncio.to_thread(self.repository.list_checks, guild.id):
-                if check.verification_mode.value not in ("button", "either"):
+                if check.verification_mode.value not in ("button", "photo", "either"):
                     continue
                 rows = await asyncio.to_thread(self.repository.list_daily_checkins, check.id)
                 for row in rows:

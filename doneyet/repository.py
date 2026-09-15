@@ -189,6 +189,28 @@ class CheckRepository:
                 rows = db.execute("SELECT check_id, schedule_id, date, message_id, thread_id FROM daily_checkins WHERE check_id = ?", (check_id,)).fetchall()
             return [dict(row) for row in rows]
 
+    def reminder_sent(self, check_id: int, schedule_id: int, date: str) -> bool:
+        with connect_database(self.db_path) as db:
+            return db.execute("SELECT reminder_sent_at FROM daily_checkins WHERE check_id=? AND schedule_id=? AND date=?", (check_id, schedule_id, date)).fetchone()[0] is not None
+
+    def mark_reminder_sent(self, check_id: int, schedule_id: int, date: str) -> bool:
+        with connect_database(self.db_path) as db:
+            try:
+                db.execute("UPDATE daily_checkins SET reminder_sent_at = strftime('%Y-%m-%dT%H:%M:%f+00:00','now') WHERE check_id=? AND schedule_id=? AND date=? AND reminder_sent_at IS NULL", (check_id, schedule_id, date))
+                if db.total_changes == 0:
+                    return False
+            except sqlite3.IntegrityError:
+                return False
+            return True
+
+    def unverified_member_ids(self, check_id: int, schedule_id: int, date: str) -> list[int]:
+        with connect_database(self.db_path) as db:
+            return [r[0] for r in db.execute("SELECT m.user_id FROM check_members m WHERE m.check_id=? AND m.active=1 AND NOT EXISTS (SELECT 1 FROM verifications v WHERE v.check_id=? AND v.schedule_id=? AND v.date=? AND v.user_id=m.user_id)", (check_id, check_id, schedule_id, date))]
+
+    def verified_member_ids(self, check_id: int, schedule_id: int, date: str) -> list[int]:
+        with connect_database(self.db_path) as db:
+            return [r[0] for r in db.execute("SELECT user_id FROM verifications WHERE check_id=? AND schedule_id=? AND date=?", (check_id, schedule_id, date))]
+
     def delete_check(self, guild_id: int, check_id: int, *, expected: Check | None = None) -> bool:
         """Delete only a Check in this guild, including all dependent records."""
         with connect_database(self.db_path) as db:
