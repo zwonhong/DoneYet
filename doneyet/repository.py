@@ -211,6 +211,20 @@ class CheckRepository:
         with connect_database(self.db_path) as db:
             return [r[0] for r in db.execute("SELECT user_id FROM verifications WHERE check_id=? AND schedule_id=? AND date=?", (check_id, schedule_id, date))]
 
+    def report_sent(self, check_id: int, year: int, month: int) -> bool:
+        with connect_database(self.db_path) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS monthly_reports(check_id INTEGER, year INTEGER, month INTEGER, sent_at TEXT, PRIMARY KEY(check_id,year,month))")
+            return db.execute("SELECT 1 FROM monthly_reports WHERE check_id=? AND year=? AND month=?", (check_id, year, month)).fetchone() is not None
+
+    def mark_report_sent(self, check_id: int, year: int, month: int) -> bool:
+        with connect_database(self.db_path) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS monthly_reports(check_id INTEGER, year INTEGER, month INTEGER, sent_at TEXT, PRIMARY KEY(check_id,year,month))")
+            try:
+                db.execute("INSERT INTO monthly_reports VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))", (check_id, year, month))
+            except sqlite3.IntegrityError:
+                return False
+            return True
+
     def delete_check(self, guild_id: int, check_id: int, *, expected: Check | None = None) -> bool:
         """Delete only a Check in this guild, including all dependent records."""
         with connect_database(self.db_path) as db:

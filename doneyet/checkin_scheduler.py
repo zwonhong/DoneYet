@@ -10,6 +10,7 @@ from doneyet.repository import CheckRepository
 from doneyet.scheduler import due_sessions
 from doneyet.verification import ButtonVerificationView
 from zoneinfo import ZoneInfo
+from doneyet.monthly_report import previous_month, build_report
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class CheckinScheduler:
                 for check in await asyncio.to_thread(self.repository.list_checks, guild.id):
                     try:
                         local = now.astimezone(ZoneInfo(check.timezone))
+                        await self._monthly_report(check, guild, local)
                         await self._process_reminders(check, guild, local)
                         await self._close_threads(check, guild, local)
                         for due in due_sessions(check, now):
@@ -53,6 +55,17 @@ class CheckinScheduler:
                     except Exception:
                         logger.exception("Scheduler failed for Check %s", check.id)
         return created
+
+    async def _monthly_report(self, check, guild, local):
+        year, month = previous_month(local.year, local.month)
+        if await asyncio.to_thread(self.repository.report_sent, check.id, year, month):
+            return
+        channel = self.client.get_channel(check.channel_id)
+        if channel is None:
+            return
+        text = await asyncio.to_thread(build_report, self.repository, check, year, month, guild)
+        await channel.send(text)
+        await asyncio.to_thread(self.repository.mark_report_sent, check.id, year, month)
 
     async def _process_reminders(self, check, guild, local):
         for schedule in check.schedules:

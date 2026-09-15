@@ -9,6 +9,8 @@ from discord import app_commands
 from doneyet.check_ui import CreateCheckView
 from doneyet.check_browser import CheckBrowser
 from doneyet.repository import CheckRepository
+from doneyet.leaderboard import calculate_month
+from datetime import datetime
 
 
 def can_create_check(interaction: discord.Interaction) -> bool:
@@ -59,3 +61,25 @@ class CheckCommands(app_commands.Group):
     @app_commands.command(name="delete", description="Check를 선택하고 확인 후 삭제합니다.")
     async def delete(self, interaction: discord.Interaction) -> None:
         await self.open_browser(interaction, "delete")
+
+    @app_commands.command(name="leaderboard", description="월간 Check Leaderboard를 표시합니다.")
+    @app_commands.describe(check_id="Check ID", year="연도(생략 시 현재 연도)", month="월(생략 시 현재 월)")
+    async def leaderboard(self, interaction: discord.Interaction, check_id: int, year: int | None = None, month: int | None = None) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("서버에서 실행해주세요.", ephemeral=True); return
+        now = datetime.now()
+        year, month = year or now.year, month or now.month
+        if month < 1 or month > 12:
+            await interaction.response.send_message("월은 1~12 사이여야 합니다.", ephemeral=True); return
+        check = await asyncio.to_thread(self.repository.get_check, interaction.guild_id, check_id)
+        if check is None:
+            await interaction.response.send_message("현재 서버의 Check가 아닙니다.", ephemeral=True); return
+        rows = await asyncio.to_thread(calculate_month, self.repository, check, year, month)
+        if not rows:
+            await interaction.response.send_message("참여자가 없습니다.", ephemeral=True); return
+        lines = [f"🏆 {year}년 {month}월 — {check.name}"]
+        for i, (uid, done, scheduled, rate) in enumerate(rows, 1):
+            member = interaction.guild.get_member(uid)
+            name = member.display_name if member else str(uid)
+            lines.append(f"{i}. {name} — {done} / {scheduled} ({rate:.1%})")
+        await interaction.response.send_message("\n".join(lines))
