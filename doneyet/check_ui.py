@@ -38,23 +38,24 @@ def settings_embed(data: CheckInput, *, created: Check) -> discord.Embed:
 
 
 class CreateCheckView(discord.ui.View):
-    def __init__(self, owner_id: int, guild_id: int, repository: CheckRepository) -> None:
+    def __init__(self, owner_id: int, guild_id: int, repository: CheckRepository, existing: Check | None = None) -> None:
         super().__init__(timeout=UI_TIMEOUT)
         self.owner_id = owner_id
         self.guild_id = guild_id
         self.repository = repository
+        self.existing = existing
         self.message: discord.InteractionMessage | None = None
         self.revision = 0
         self.state = "active"
         self.created: Check | None = None
         self.lock = asyncio.Lock()
-        self.name = ""
-        self.channel_id: int | None = None
-        self.mode: VerificationMode | None = None
-        self.weekdays: tuple[int, ...] = ()
-        self.member_ids: tuple[int, ...] = ()
-        self.session_count = 1
-        self.schedules: dict[int, ScheduleInput] = {}
+        self.name = existing.name if existing else ""
+        self.channel_id = existing.channel_id if existing else None
+        self.mode = existing.verification_mode if existing else None
+        self.weekdays = existing.weekdays if existing else ()
+        self.member_ids = tuple(m.user_id for m in existing.members) if existing else ()
+        self.session_count = existing.daily_sessions if existing else 1
+        self.schedules = {s.sequence - 1: ScheduleInput(s.check_time, s.reminder_time) for s in existing.schedules} if existing else {}
         self.rebuild()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -94,7 +95,7 @@ class CreateCheckView(discord.ui.View):
         return data
 
     def embed(self) -> discord.Embed:
-        embed = discord.Embed(title="⚙️ DoneYet? Check 만들기", colour=discord.Colour.blurple())
+        embed = discord.Embed(title=("⚙️ DoneYet? Check 수정" if self.existing else "⚙️ DoneYet? Check 만들기"), colour=discord.Colour.blurple())
         embed.description = "원하는 순서로 설정을 수정한 뒤 생성 버튼을 누르세요."
         embed.add_field(name="이름", value=discord.utils.escape_markdown(self.name) or "미설정", inline=False)
         embed.add_field(name="채널", value=f"<#{self.channel_id}>" if self.channel_id else "미설정")
@@ -220,7 +221,13 @@ class CreateCheckView(discord.ui.View):
         data = self.input()
         await interaction.response.defer()
         try:
-            created = await asyncio.to_thread(self.repository.create_check, data)
+            if self.existing:
+                ok = await asyncio.to_thread(self.repository.update_check_settings, self.guild_id, self.existing.id, data)
+                if not ok:
+                    raise ValueError("Check를 찾을 수 없습니다.")
+                created = self.existing
+            else:
+                created = await asyncio.to_thread(self.repository.create_check, data)
         except (sqlite3.Error, OSError):
             logger.exception("Check creation failed")
             await interaction.followup.send("저장하지 못했습니다. 입력 내용은 유지됩니다. 잠시 후 생성 버튼으로 다시 시도해 주세요.", ephemeral=True)

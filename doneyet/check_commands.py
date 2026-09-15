@@ -83,3 +83,15 @@ class CheckCommands(app_commands.Group):
             name = member.display_name if member else str(uid)
             lines.append(f"{i}. {name} — {done} / {scheduled} ({rate:.1%})")
         await interaction.response.send_message("\n".join(lines))
+
+    @app_commands.command(name="edit", description="Check 설정을 수정합니다.")
+    @app_commands.describe(check_id="수정할 Check ID")
+    async def edit(self, interaction: discord.Interaction, check_id: int) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("서버에서 실행해주세요.", ephemeral=True); return
+        check = await asyncio.to_thread(self.repository.get_check, interaction.guild_id, check_id)
+        if check is None:
+            await interaction.response.send_message("현재 서버의 Check가 아닙니다.", ephemeral=True); return
+        view = CreateCheckView(interaction.user.id, interaction.guild_id, self.repository, existing=check)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+        view.message = await interaction.original_response()

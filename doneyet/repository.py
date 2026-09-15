@@ -102,6 +102,32 @@ class CheckRepository:
             row = db.execute("SELECT * FROM checks WHERE id = ?", (check_id,)).fetchone()
             return _read_check(db, row)
 
+    def update_check_basic(self, guild_id: int, check_id: int, *, name=None, channel_id=None, enabled=None) -> bool:
+        with connect_database(self.db_path) as db:
+            fields, values = [], []
+            if name is not None: fields.append("name=?"); values.append(name.strip())
+            if channel_id is not None: fields.append("channel_id=?"); values.append(channel_id)
+            if enabled is not None: fields.append("enabled=?"); values.append(int(enabled))
+            if not fields: return False
+            values.extend((check_id, guild_id))
+            cur = db.execute(f"UPDATE checks SET {', '.join(fields)} WHERE id=? AND guild_id=?", values)
+            return cur.rowcount > 0
+
+    def update_check_settings(self, guild_id: int, check_id: int, data: CheckInput) -> bool:
+        with connect_database(self.db_path) as db:
+            if db.execute("SELECT 1 FROM checks WHERE id=? AND guild_id=?", (check_id, guild_id)).fetchone() is None:
+                return False
+            db.execute("UPDATE checks SET name=?, channel_id=?, verification_mode=?, enabled=? WHERE id=?", (data.name.strip(), data.channel_id, VerificationMode(data.verification_mode).value, int(data.enabled), check_id))
+            db.execute("DELETE FROM check_days WHERE check_id=?", (check_id,)); db.executemany("INSERT INTO check_days(check_id,weekday) VALUES (?,?)", ((check_id,d) for d in data.weekdays))
+            for i,s in enumerate(data.schedules,1):
+                db.execute("UPDATE check_schedules SET check_time=?, reminder_time=? WHERE check_id=? AND sequence=?", (s.check_time,s.reminder_time,check_id,i))
+            return True
+
+    def update_schedule(self, guild_id: int, check_id: int, sequence: int, check_time: str, reminder_time: str) -> bool:
+        with connect_database(self.db_path) as db:
+            cur = db.execute("UPDATE check_schedules SET check_time=?, reminder_time=? WHERE check_id=? AND sequence=? AND EXISTS (SELECT 1 FROM checks WHERE id=? AND guild_id=?)", (check_time, reminder_time, check_id, sequence, check_id, guild_id))
+            return cur.rowcount > 0
+
     def get_check(self, guild_id: int, check_id: int) -> Check | None:
         with connect_database(self.db_path) as db:
             db.execute("BEGIN")  # Keep parent and child reads in one snapshot.
