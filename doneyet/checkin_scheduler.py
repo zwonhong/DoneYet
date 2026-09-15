@@ -48,10 +48,12 @@ class CheckinScheduler:
                                 thread_name = f"{check.name} · {due.local_date} · {due.schedule.sequence}회차 인증"
                                 thread = await message.create_thread(name=thread_name[:100])
                                 thread_id = thread.id
+                                logger.info("Verification thread created: check=%s schedule=%s thread=%s", check.id, due.schedule.id, thread.id)
                                 if view is not None:
                                     await thread.send("아래 버튼을 눌러 인증하세요.", view=view)
                             if await asyncio.to_thread(self.repository.create_daily_checkin, check.id, due.schedule.id, due.local_date, message.id, thread_id):
                                 created += 1
+                                logger.info("Check-in created: check=%s schedule=%s date=%s", check.id, due.schedule.id, due.local_date)
                     except Exception:
                         logger.exception("Scheduler failed for Check %s", check.id)
         return created

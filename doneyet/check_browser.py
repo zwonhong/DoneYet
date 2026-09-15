@@ -131,6 +131,7 @@ class CheckBrowser(discord.ui.View):
                     await interaction.followup.send("먼저 삭제할 Check를 선택하세요.", ephemeral=True)
                     return
                 deleted = await asyncio.to_thread(self.repository.delete_check, self.guild_id, self.selected.id, expected=self.selected)
+                logger.info("Check deleted: guild=%s check=%s user=%s success=%s", self.guild_id, self.selected.id, interaction.user.id, deleted)
                 self.closed = True
                 self.stop()
                 await interaction.edit_original_response(

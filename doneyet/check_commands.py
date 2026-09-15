@@ -25,6 +25,7 @@ class CheckCommands(app_commands.Group):
 
     @app_commands.command(name="create", description="설정 패널에서 새로운 Check를 만듭니다.")
     async def create(self, interaction: discord.Interaction) -> None:
+        logging.getLogger(__name__).info("/check create opened: guild=%s user=%s", interaction.guild_id, interaction.user.id)
         if not can_create_check(interaction):
             await interaction.response.send_message("서버에서 실행해 주세요.", ephemeral=True)
             return
@@ -60,6 +61,7 @@ class CheckCommands(app_commands.Group):
 
     @app_commands.command(name="delete", description="Check를 선택하고 확인 후 삭제합니다.")
     async def delete(self, interaction: discord.Interaction) -> None:
+        logging.getLogger(__name__).info("/check delete opened: guild=%s user=%s", interaction.guild_id, interaction.user.id)
         await self.open_browser(interaction, "delete")
 
     @app_commands.command(name="leaderboard", description="월간 Check Leaderboard를 표시합니다.")
@@ -87,6 +89,7 @@ class CheckCommands(app_commands.Group):
     @app_commands.command(name="edit", description="Check 설정을 수정합니다.")
     @app_commands.describe(check_id="수정할 Check ID")
     async def edit(self, interaction: discord.Interaction, check_id: int) -> None:
+        logging.getLogger(__name__).info("/check edit opened: guild=%s check=%s user=%s", interaction.guild_id, check_id, interaction.user.id)
         if interaction.guild_id is None:
             await interaction.response.send_message("서버에서 실행해주세요.", ephemeral=True); return
         check = await asyncio.to_thread(self.repository.get_check, interaction.guild_id, check_id)

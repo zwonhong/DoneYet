@@ -1,9 +1,12 @@
 import asyncio
+import logging
 
 import discord
 from discord import app_commands
 
 from doneyet.repository import CheckRepository
+
+logger = logging.getLogger(__name__)
 
 
 class MemberView(discord.ui.View):
@@ -108,6 +111,7 @@ class MemberView(discord.ui.View):
             result = await asyncio.to_thread(self.repository.remove_member, self.guild_id, self.check_id, self.user_id)
             messages = {'removed': '참여자를 제거했습니다. 참여 이력은 보존됩니다.', 'not_member': '현재 참여자가 아닙니다.', 'missing_check': '이 서버의 Check가 아닙니다.'}
         self.closed = True; self.stop()
+        logger.info("Member %s: guild=%s check=%s user=%s actor=%s result=%s", self.action, self.guild_id, self.check_id, self.user_id, self.owner_id, result)
         await interaction.response.edit_message(content=messages[result], view=None)
 
     async def _cancel(self, interaction):

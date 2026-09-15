@@ -1,6 +1,7 @@
 """SQLite schema and connections, independent of Discord."""
 
 import sqlite3
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Iterator
 
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "doneyet.db"
+logger = logging.getLogger(__name__)
 
 # Timestamps are UTC ISO 8601 TEXT with an explicit offset. Dates and schedule
 # times are local to checks.timezone, not to the host operating system.
@@ -102,6 +104,7 @@ def connect_database(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
 
 def initialize_database(db_path: Path = DB_PATH) -> None:
     """Create missing tables without clearing existing records."""
+    logger.info("Initializing database at %s", db_path)
     with connect_database(db_path) as connection:
         connection.executescript("BEGIN;\n" + SCHEMA + "\nCOMMIT;")
         columns = {row[1] for row in connection.execute("PRAGMA table_info(check_members)")}

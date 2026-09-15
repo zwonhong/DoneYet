@@ -237,7 +237,8 @@ class CreateCheckView(discord.ui.View):
             return
         # Mark completion before Discord HTTP calls, so an edit failure cannot
         # turn a successful database commit into a duplicate on retry.
-        self.created = created
+            self.created = created
+            logger.info("Check saved: guild=%s check=%s user=%s", self.guild_id, created.id, self.owner_id)
         self.state = "saved"
         self.stop()
         await interaction.edit_original_response(content=None, embed=settings_embed(data, created=created), view=None)

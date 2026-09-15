@@ -113,6 +113,9 @@ class DoneYetBot(discord.Client):
         else:
             await message.channel.send(f"{message.author.display_name}님, 이미 이번 회차를 완료했어요. ✅")
 
+    async def on_command_error(self, ctx, error) -> None:
+        logger.exception("Command error", exc_info=error)
+
     async def restore_verification_views(self) -> None:
         """Re-register buttons for persisted check-ins after a restart."""
         for guild in self.guilds:
