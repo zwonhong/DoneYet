@@ -1,13 +1,17 @@
 import logging
 import sys
+import asyncio
 from pathlib import Path
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 
 from doneyet.check_commands import CheckCommands
 from doneyet.repository import CheckRepository
 from doneyet.member_commands import MemberCommands
+from doneyet.checkin_scheduler import CheckinScheduler
+from doneyet.verification import ButtonVerificationView
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +36,9 @@ class DoneYetBot(discord.Client):
         intents = discord.Intents.none()
         intents.guilds = True
         intents.members = True
+        intents.messages = True
+        # Required by Discord to deliver guild message events to on_message.
+        intents.message_content = True
         super().__init__(intents=intents)
         self.development_guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
@@ -39,6 +46,10 @@ class DoneYetBot(discord.Client):
         check_commands = CheckCommands(CheckRepository())
         check_commands.add_command(MemberCommands(check_commands.repository))
         self.tree.add_command(check_commands)
+        self.repository = check_commands.repository
+        self.scheduler = CheckinScheduler(self, self.repository)
+        self._scheduler_started = False
+        self._views_restored = False
 
     async def setup_hook(self) -> None:
         # All modules/groups are registered in __init__ before any sync occurs.
@@ -70,3 +81,61 @@ class DoneYetBot(discord.Client):
 
     async def on_ready(self) -> None:
         print(f"DoneYet? logged in as {self.user}", flush=True)
+        # ``on_ready`` is also called directly by unit tests; before login
+        # discord.py has no ready event, so starting a loop would fail.
+        if getattr(self, "_ready", None) is None:
+            return
+        if not self._views_restored:
+            await self.restore_verification_views()
+            self._views_restored = True
+        if not self._scheduler_started:
+            self._scheduler_started = True
+            self.daily_scheduler.start()
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot or message.webhook_id or not isinstance(message.channel, discord.Thread):
+            return
+        row = await asyncio.to_thread(self.repository.get_checkin_by_thread, message.channel.id)
+        if row is None or not message.attachments:
+            return
+        check_id, schedule_id, date = row
+        check = await asyncio.to_thread(self.repository.get_check, message.guild.id if message.guild else 0, check_id)
+        if check is None or check.verification_mode.value not in ("photo", "either"):
+            return
+        if not await asyncio.to_thread(self.repository.is_check_member, check_id, message.author.id):
+            return
+        image = any((a.content_type or "").lower().startswith("image/") or a.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")) for a in message.attachments)
+        if not image:
+            return
+        created = await asyncio.to_thread(self.repository.create_verification, check_id, schedule_id, message.author.id, date, "photo")
+        if created:
+            await message.channel.send(f"{message.author.display_name}님 인증 완료! ✅")
+        else:
+            await message.channel.send(f"{message.author.display_name}님, 이미 이번 회차를 완료했어요. ✅")
+
+    async def restore_verification_views(self) -> None:
+        """Re-register buttons for persisted check-ins after a restart."""
+        for guild in self.guilds:
+            for check in await asyncio.to_thread(self.repository.list_checks, guild.id):
+                if check.verification_mode.value not in ("button", "either"):
+                    continue
+                rows = await asyncio.to_thread(self.repository.list_daily_checkins, check.id)
+                for row in rows:
+                    self.add_view(ButtonVerificationView(self.repository, check.id, row["schedule_id"], row["date"]),
+                                  message_id=row["message_id"])
+
+    @tasks.loop(seconds=30)
+    async def daily_scheduler(self) -> None:
+        await self.scheduler.tick()
+
+    @daily_scheduler.before_loop
+    async def wait_for_scheduler_ready(self) -> None:
+        if getattr(self._connection, "_ready", None) is None:
+            return
+        await self.wait_until_ready()
+
+    async def close(self) -> None:
+        if self._scheduler_started:
+            self.daily_scheduler.cancel()
+            self._scheduler_started = False
+        await super().close()

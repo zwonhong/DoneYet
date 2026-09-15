@@ -153,6 +153,42 @@ class CheckRepository:
             db.execute("UPDATE check_members SET active = 0, left_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') WHERE check_id = ? AND user_id = ?", (check_id, user_id))
             return "removed"
 
+    def checkin_exists(self, check_id: int, schedule_id: int, date: str) -> bool:
+        with connect_database(self.db_path) as db:
+            return db.execute("SELECT 1 FROM daily_checkins WHERE check_id = ? AND schedule_id = ? AND date = ?",
+                              (check_id, schedule_id, date)).fetchone() is not None
+
+    def create_daily_checkin(self, check_id: int, schedule_id: int, date: str, message_id: int, thread_id: int | None = None) -> bool:
+        """Persist a successfully sent message; UNIQUE is the final duplicate guard."""
+        with connect_database(self.db_path) as db:
+            try:
+                db.execute("INSERT INTO daily_checkins (check_id, schedule_id, date, message_id, thread_id) VALUES (?, ?, ?, ?, ?)",
+                           (check_id, schedule_id, date, message_id, thread_id))
+            except sqlite3.IntegrityError:
+                return False
+            return True
+
+    def get_checkin_by_thread(self, thread_id: int):
+        with connect_database(self.db_path) as db:
+            return db.execute("SELECT check_id, schedule_id, date FROM daily_checkins WHERE thread_id = ?", (thread_id,)).fetchone()
+
+    def create_verification(self, check_id: int, schedule_id: int, user_id: int, date: str, method: str) -> bool:
+        with connect_database(self.db_path) as db:
+            try:
+                db.execute("INSERT INTO verifications (check_id, schedule_id, user_id, date, verification_method) VALUES (?, ?, ?, ?, ?)", (check_id, schedule_id, user_id, date, method))
+            except sqlite3.IntegrityError:
+                return False
+            return True
+
+    def list_daily_checkins(self, check_id: int | None = None) -> list[dict]:
+        """Return persisted check-ins, used to restore persistent buttons."""
+        with connect_database(self.db_path) as db:
+            if check_id is None:
+                rows = db.execute("SELECT check_id, schedule_id, date, message_id, thread_id FROM daily_checkins").fetchall()
+            else:
+                rows = db.execute("SELECT check_id, schedule_id, date, message_id, thread_id FROM daily_checkins WHERE check_id = ?", (check_id,)).fetchall()
+            return [dict(row) for row in rows]
+
     def delete_check(self, guild_id: int, check_id: int, *, expected: Check | None = None) -> bool:
         """Delete only a Check in this guild, including all dependent records."""
         with connect_database(self.db_path) as db:
