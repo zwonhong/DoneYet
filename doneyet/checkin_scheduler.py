@@ -38,11 +38,16 @@ class CheckinScheduler:
                                 continue
                             content = f"📋 {check.name} — {due.schedule.sequence}/{check.daily_sessions}\n{due.local_date} · {due.schedule.sequence}회차"
                             view = ButtonVerificationView(self.repository, check.id, due.schedule.id, due.local_date) if check.verification_mode.value in ("button", "either") else None
-                            message = await channel.send(content, view=view)
+                            # Keep the parent message as the daily entry point; for
+                            # Thread based checks also place the button inside the thread.
+                            message = await channel.send(content)
                             thread_id = None
                             if check.verification_mode.value in ("button", "photo", "either"):
-                                thread = await message.create_thread(name=f"{due.local_date} · {due.schedule.sequence}회차 인증")
+                                thread_name = f"{check.name} · {due.local_date} · {due.schedule.sequence}회차 인증"
+                                thread = await message.create_thread(name=thread_name[:100])
                                 thread_id = thread.id
+                                if view is not None:
+                                    await thread.send("아래 버튼을 눌러 인증하세요.", view=view)
                             if await asyncio.to_thread(self.repository.create_daily_checkin, check.id, due.schedule.id, due.local_date, message.id, thread_id):
                                 created += 1
                     except Exception:
@@ -62,9 +67,12 @@ class CheckinScheduler:
             if not ids or not await asyncio.to_thread(self.repository.mark_reminder_sent, check.id, schedule.id, date):
                 continue
             channel = self.client.get_channel(check.channel_id)
-            if channel:
+            rows = await asyncio.to_thread(self.repository.list_daily_checkins, check.id)
+            target_id = next((r["thread_id"] for r in rows if r["schedule_id"] == schedule.id and r["date"] == date and r["thread_id"]), None)
+            target = self.client.get_channel(target_id) if target_id else channel
+            if target:
                 names = [getattr(guild.get_member(uid), "mention", str(uid)) for uid in ids]
-                await channel.send(f"🔔 아직 {schedule.sequence}회차 체크를 완료하지 않았어요.\n" + "\n".join(names))
+                await target.send(f"🔔 아직 {schedule.sequence}회차 체크를 완료하지 않았어요.\n" + "\n".join(names))
 
     async def _close_threads(self, check, guild, local):
         for row in await asyncio.to_thread(self.repository.list_daily_checkins, check.id):

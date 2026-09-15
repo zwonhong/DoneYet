@@ -121,8 +121,9 @@ class DoneYetBot(discord.Client):
                     continue
                 rows = await asyncio.to_thread(self.repository.list_daily_checkins, check.id)
                 for row in rows:
-                    self.add_view(ButtonVerificationView(self.repository, check.id, row["schedule_id"], row["date"]),
-                                  message_id=row["message_id"])
+                    # Register globally by stable custom_id so buttons posted
+                    # inside the verification Thread also survive restarts.
+                    self.add_view(ButtonVerificationView(self.repository, check.id, row["schedule_id"], row["date"]))
 
     @tasks.loop(seconds=30)
     async def daily_scheduler(self) -> None:
